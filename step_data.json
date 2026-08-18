@@ -1,0 +1,58 @@
+{
+  "main_goal": "实现一个步骤跟踪工具",
+  "current_node": "3",
+  "nodes": [
+    {
+      "id": "1",
+      "title": "需求分析",
+      "description": "分析用户对步骤跟踪工具的具体需求",
+      "status": "completed",
+      "x": 230.92012500000004,
+      "y": -204.03204999999994,
+      "next": [
+        "2"
+      ]
+    },
+    {
+      "id": "2",
+      "title": "设计数据模型",
+      "description": "设计节点/边/主目标的数据结构",
+      "status": "completed",
+      "x": 350.0131111094561,
+      "y": 1.5123526932481148,
+      "next": [
+        "3",
+        "test"
+      ]
+    },
+    {
+      "id": "3",
+      "title": "实现 PySide6 GUI",
+      "description": "使用 QGraphicsView 渲染流程图",
+      "status": "in_progress",
+      "x": 621.1600000000001,
+      "y": 142.01749999999998,
+      "next": [
+        "5"
+      ]
+    },
+    {
+      "id": "5",
+      "title": "测试与提示音",
+      "description": "运行验证功能完整性",
+      "status": "in_progress",
+      "x": 957.1225000000001,
+      "y": 128.28249999999997,
+      "next": []
+    },
+    {
+      "id": "test",
+      "title": "test",
+      "description": "test",
+      "status": "pending",
+      "x": 272.8449749999998,
+      "y": 313.07211874999996,
+      "next": []
+    }
+  ]
+}
