@@ -1,0 +1,29 @@
+{
+  "presets": {
+    "hello-g++": {
+      "name": "hello-g++",
+      "command": "g++ -std=c++17 -Wall -Wextra -O2 main.cpp -o main.exe",
+      "cwd": ".",
+      "description": "示例：用 g++ 编译 main.cpp"
+    },
+    "hello-cl": {
+      "name": "hello-cl",
+      "command": "cl /nologo /EHsc /O2 /W3 main.cpp /Fe:main.exe",
+      "cwd": ".",
+      "description": "示例：用 MSVC cl.exe 编译 main.cpp"
+    },
+    "cmake-build": {
+      "name": "cmake-build",
+      "command": "cmake --build build --config Release",
+      "cwd": ".",
+      "description": "示例：使用 CMake 构建 build 目录"
+    },
+    "123": {
+      "name": "123",
+      "command": "",
+      "cwd": ".",
+      "description": ""
+    }
+  },
+  "last_preset": "hello-clang"
+}

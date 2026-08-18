@@ -111,10 +111,39 @@ class OutputParser:
     CMAKE_PROGRESS_RE = re.compile(
         r"^\[(?P<current>\d+)/(?P<total>\d+)\]\s+(?P<text>.*)$"
     )
+    # SCons 阶段标签: scons: Reading SConscript files ... / Building targets ... / done ...
+    SCONS_STAGE_RE = re.compile(
+        r"^scons:\s*"
+        r"(?P<phase>Reading SConscript files \.\.\."
+        r"|done reading SConscript files\."
+        r"|Building targets \.\.\."
+        r"|done building targets\.)\s*$"
+    )
+    # SCons 错误: scons: *** [target] Error 1
+    SCONS_ERR_RE = re.compile(
+        r"^scons:\s*\*\*\*\s*\[(?P<target>[^\]]+)\]\s*(?P<rest>.*)$"
+    )
+    # 编译器命令行（SCons 非 -Q 模式 + Make 工具常见）
+    # 匹配: g++ / gcc / clang++ / clang / cl / MSBuild / link / ld / ar / cmake / ninja
+    # 注: 用 lookahead 替代 \b，因为 + 等符号不是 word char，\b 无法在 g++ 末尾匹配
+    COMPILER_CMD_RE = re.compile(
+        r"^(?P<cmd>g\+\+|gcc|clang\+\+?|cl(?:\.exe)?|MSBuild|link(?:\.exe)?|ld|ar"
+        r"|cmake(?:\.exe)?|ninja(?:\.exe)?|make|gmake|cc|c\+\+)"
+        r"(?=[\s\-/\\]|$)",
+        re.IGNORECASE,
+    )
     # 简单行内 error/warning 检测（兜底）
     SIMPLE_RE = re.compile(
         r"\b(error|warning|fatal error)\b", re.IGNORECASE
     )
+
+    # SCons 阶段 → 内部阶段权重（用于无 N/M 时的进度估算）
+    _SCONS_PHASE_WEIGHT = {
+        "reading": 0.10,
+        "read_done": 0.20,
+        "building": 0.20,  # building 起始，与 read_done 等权重
+        "build_done": 1.00,
+    }
 
     def __init__(self):
         """初始化解析器。"""
@@ -123,6 +152,16 @@ class OutputParser:
         self.warnings = 0
         self.current_step = 0
         self.total_steps = 0
+        # SCons 状态：是否已进入 scons 阶段（避免误判普通 g++ 命令）
+        self._scons_active = False
+        # SCons 内部阶段："" / "reading" / "read_done" / "building" / "build_done"
+        self._scons_phase = ""
+        # SCons 子命令计数（building 阶段每行命令 +1）
+        self._scons_substeps = 0
+        # SCons 估算的子步骤总数（动态调整）
+        self._scons_substeps_high = 0
+        # 记录触发进度的回调
+        self.on_progress: Optional[Callable[[int, int], None]] = None
 
     def parse(self, line: str, elapsed_ms: int) -> CompileMessage:
         """解析一行输出，返回 CompileMessage。"""
@@ -175,6 +214,57 @@ class OutputParser:
                 time_ms=elapsed_ms,
             )
 
+        # 4.5 SCons 阶段标签
+        m = self.SCONS_STAGE_RE.match(clean)
+        if m:
+            phase_raw = m.group("phase")
+            if phase_raw.startswith("Reading"):
+                self._scons_active = True
+                self._scons_phase = "reading"
+            elif phase_raw.startswith("done reading"):
+                self._scons_phase = "read_done"
+            elif phase_raw.startswith("Building"):
+                self._scons_phase = "building"
+            elif phase_raw.startswith("done building"):
+                self._scons_phase = "build_done"
+            self._update_scons_progress()
+            return CompileMessage(
+                kind="info",
+                text=f"SCons {phase_raw}",
+                raw=raw,
+                time_ms=elapsed_ms,
+            )
+
+        # 4.6 SCons 错误: scons: *** [target] Error 1
+        m = self.SCONS_ERR_RE.match(clean)
+        if m:
+            self.errors += 1
+            self._scons_phase = "build_done"  # 失败即终止进度
+            self._update_scons_progress()
+            return CompileMessage(
+                kind="error",
+                text=clean,
+                raw=raw,
+                time_ms=elapsed_ms,
+            )
+
+        # 4.7 SCons 子命令（仅在 building 阶段计数）
+        if self._scons_active and self._scons_phase == "building":
+            if self.COMPILER_CMD_RE.match(clean):
+                self._scons_substeps += 1
+                # 自适应预估：当前计数的 1.3 倍作为预估上限
+                self._scons_substeps_high = max(
+                    self._scons_substeps_high,
+                    int(self._scons_substeps * 1.3) + 1,
+                )
+                self._update_scons_progress()
+                return CompileMessage(
+                    kind="info",
+                    text=f"→ {clean[:200]}{'...' if len(clean) > 200 else ''}",
+                    raw=raw,
+                    time_ms=elapsed_ms,
+                )
+
         # 5. 兜底：粗略判断
         if self.SIMPLE_RE.search(clean):
             if "error" in clean.lower():
@@ -210,6 +300,43 @@ class OutputParser:
             short = os.path.basename(file_path)
             if short:
                 self.files_seen.append(short)
+
+    def _update_scons_progress(self) -> None:
+        """根据 SCons 阶段 + 子步骤数估算进度，写入 current_step/total_steps。
+
+        进度模型（base = 阶段权重，sub = building 内子步骤 0~0.8）：
+          reading        → 10%
+          read_done      → 20%
+          building       → 20% (起)
+          building + k   → 20% + k/N * 80%
+          build_done     → 100%
+        其中 N 是动态预估上限（取 max(当前计数*1.3+1, 上限)），保证进度只前进不回退。
+        """
+        phase = self._scons_phase
+        if phase == "reading":
+            cur, total = 1, 10
+        elif phase == "read_done":
+            cur, total = 2, 10
+        elif phase == "building":
+            sub_cur = self._scons_substeps
+            sub_total = max(self._scons_substeps_high, 1)
+            # base = 2, span = 8 (2..10)
+            cur = 2 + int(sub_cur * 8 / sub_total)
+            total = 10
+        elif phase == "build_done":
+            cur = total = 10
+        else:
+            return
+
+        # 单调递增（不回退）
+        if cur > self.current_step or total != self.total_steps:
+            self.current_step = cur
+            self.total_steps = total
+            if self.on_progress:
+                try:
+                    self.on_progress(cur, total)
+                except Exception:
+                    pass
 
 
 # ===== 编译执行器 =====
@@ -249,6 +376,9 @@ class CompileRunner:
         self._stopped = False
         self.messages.clear()
         self._all_raw.clear()
+        # 把外层进度回调桥接到 parser（让 scons/cmake 阶段变化也能触发进度）
+        if self.on_progress:
+            self.parser.on_progress = self.on_progress
 
         try:
             # Windows 下 CREATE_NEW_PROCESS_GROUP 便于终止
@@ -426,6 +556,12 @@ class PresetManager:
                     "cwd": ".",
                     "description": "示例：使用 CMake 构建 build 目录",
                 },
+                "scons-build": {
+                    "name": "scons-build",
+                    "command": "scons -j4",
+                    "cwd": ".",
+                    "description": "示例：使用 SCons 构建（4 线程）",
+                },
             },
             "last_preset": "hello-g++",
         }
@@ -512,7 +648,11 @@ def save_log(result: CompileResult, log_dir: Path = LOG_DIR) -> tuple:
 # ===== GUI 部分 =====
 def run_gui() -> None:
     """启动 PySide6 图形界面。"""
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen") if "--offscreen" in sys.argv else None
+    # 如果传入 --offscreen 则用 offscreen 平台（用于测试）
+    # 必须在 argparse 之前移除，否则会报 unrecognized arguments
+    if "--offscreen" in sys.argv:
+        os.environ["QT_QPA_PLATFORM"] = "offscreen"
+        sys.argv = [a for a in sys.argv if a != "--offscreen"]
     from PySide6.QtWidgets import (
         QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
         QLabel, QLineEdit, QTextEdit, QPushButton, QListWidget, QListWidgetItem,
@@ -956,6 +1096,11 @@ def run_gui() -> None:
 # ===== CLI 部分 =====
 def run_cli(args: List[str]) -> int:
     """处理命令行调用。"""
+    # 提前过滤 GUI 测试标志（避免 argparse 报 unknown arg）
+    if "--offscreen" in args:
+        os.environ["QT_QPA_PLATFORM"] = "offscreen"
+        args = [a for a in args if a != "--offscreen"]
+
     parser = argparse.ArgumentParser(
         prog="compile_tool.py",
         description="图形化编译工具 CLI - 供 AI 或脚本调用",
@@ -1037,27 +1182,19 @@ def run_cli(args: List[str]) -> int:
             pm.data["last_preset"] = parsed.preset
             pm.save()
 
+        # 同步等待 CompileRunner 结束（CompileRunner 内部已用线程读输出）
         result_holder = {}
-        def finish(r):
-            result_holder["r"] = r
-            # 在 finish 后停止主循环
-            from PySide6.QtCore import QCoreApplication
-            QCoreApplication.quit()
-
-        from PySide6.QtCore import QCoreApplication, QTimer
-        app = QCoreApplication.instance() or QCoreApplication(sys.argv)
 
         runner = CompileRunner(cmd, cwd=cwd or os.getcwd())
-        runner.on_message = (lambda m: None) if parsed.quiet else (lambda m: print(m.raw))
-        runner.on_finish = finish
+        if parsed.quiet:
+            runner.on_message = lambda m: None
+        else:
+            runner.on_message = lambda m: print(m.raw, end="")
+        runner.on_finish = lambda r: result_holder.__setitem__("r", r)
         runner.start()
-
-        # 等待结束（QCoreApplication 让信号能 dispatch，但 CompileRunner 用的是普通 callback）
-        # 改用简单轮询
+        # 等待
         while "r" not in result_holder:
             time.sleep(0.05)
-            app.processEvents()
-
         r: CompileResult = result_holder["r"]
         # 保存
         if not parsed.no_save:
@@ -1067,10 +1204,9 @@ def run_cli(args: List[str]) -> int:
                     print(f"\n[日志] {log}\n[JSON] {js}", file=sys.stderr)
             except Exception as e:
                 print(f"[警告] 日志保存失败: {e}", file=sys.stderr)
-
         # 摘要
         status = "✓ 成功" if r.success else "✗ 失败"
-        print(f"{status} | 耗时 {r.duration_ms}ms | 退出码 {r.exit_code} | "
+        print(f"\n{status} | 耗时 {r.duration_ms}ms | 退出码 {r.exit_code} | "
               f"错误 {r.errors} | 警告 {r.warnings} | 行数 {r.total_lines}")
         if r.files_seen:
             print(f"涉及文件: {', '.join(r.files_seen)}")
