@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+gt — Godot 编译工具启动器 (ai_tools/compile_tool.py 的快捷入口)
+================================================================
+用法:
+    gt                          # 启动 GUI
+    gt gui                      # 启动 GUI
+    gt run --cmd "scons ..."    # CLI 单次执行
+    gt status                   # 看 build_daemon 状态
+    gt stop-daemon              # 停 daemon
+    gt help                     # 显示帮助
+"""
+import os
+import sys
+import subprocess
+from pathlib import Path
+
+# 自动定位 ai_tools 目录 (这个脚本旁边)
+GT_DIR = Path(__file__).resolve().parent
+COMPILE_TOOL = GT_DIR / "compile_tool.py"
+
+
+def main() -> int:
+    if not COMPILE_TOOL.exists():
+        sys.stderr.write(f"✗ 找不到 {COMPILE_TOOL}\n")
+        return 1
+
+    # 转发所有参数到 compile_tool.py
+    cmd = [sys.executable, str(COMPILE_TOOL)] + sys.argv[1:]
+
+    # 透传环境 (确保 DISPLAY / WAYLAND_DISPLAY 不丢)
+    env = os.environ.copy()
+
+    # 透传 Qt 平台设置
+    if "QT_QPA_PLATFORM" not in env:
+        env["QT_QPA_PLATFORM"] = "offscreen" if "--offscreen" in sys.argv else ""
+
+    try:
+        return subprocess.call(cmd, env=env)
+    except KeyboardInterrupt:
+        return 130
+    except Exception as e:
+        sys.stderr.write(f"✗ gt 启动失败: {e}\n")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

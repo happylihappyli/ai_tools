@@ -4,26 +4,72 @@
       "name": "hello-g++",
       "command": "g++ -std=c++17 -Wall -Wextra -O2 main.cpp -o main.exe",
       "cwd": ".",
-      "description": "示例：用 g++ 编译 main.cpp"
+      "description": "示例：用 g++ 编译 main.cpp",
+      "type": "generic"
     },
-    "hello-cl": {
-      "name": "hello-cl",
-      "command": "cl /nologo /EHsc /O2 /W3 main.cpp /Fe:main.exe",
-      "cwd": ".",
-      "description": "示例：用 MSVC cl.exe 编译 main.cpp"
+    "godot-editor-build": {
+      "name": "godot-editor-build",
+      "command": "GUS_PROGRESS_FORCE=1 scons platform=linuxbsd target=editor module_cloud_viewer_native_enabled=yes -j2",
+      "cwd": "/home/bv/code/BV_WorkSpace_Linux/BV_WorkSpace-main_v7",
+      "description": "完整编译 Godot editor (含 cloud_viewer_native module), 2 线程",
+      "type": "godot",
+      "extras": {
+        "binary_path": "/home/bv/code/BV_WorkSpace_Linux/BV_WorkSpace-main_v7/bin/godot.linuxbsd.editor.x86_64.cloud_ros2",
+        "editor_data_cpp": "/home/bv/code/BV_WorkSpace_Linux/BV_WorkSpace-main_v7/editor/editor_data.cpp",
+        "fix_marker": "v5.11_editor_fix",
+        "launch_script": "/home/bv/code/godot_ui_linux/run_editor_cloud_ros2.sh",
+        "ui_script": "/home/bv/code/godot_ui_linux/ui.py",
+        "render_modes": [
+          "VULKAN_WAYLAND",
+          "VULKAN_NVIDIA",
+          "VULKAN_SOFT",
+          "GLES3_NVIDIA",
+          "OPENGL3_NVIDIA",
+          "HEADLESS"
+        ],
+        "default_render": "VULKAN_WAYLAND"
+      }
+    },
+    "godot-editor-fast": {
+      "name": "godot-editor-fast",
+      "command": "GUS_PROGRESS_FORCE=1 scons platform=linuxbsd target=editor module_cloud_viewer_native_enabled=yes -j8",
+      "cwd": "/home/bv/code/BV_WorkSpace_Linux/BV_WorkSpace-main_v7",
+      "description": "快速编译 Godot editor (8 线程, 风险 stack smash)",
+      "type": "godot",
+      "extras": {
+        "binary_path": "/home/bv/code/BV_WorkSpace_Linux/BV_WorkSpace-main_v7/bin/godot.linuxbsd.editor.x86_64.cloud_ros2",
+        "editor_data_cpp": "/home/bv/code/BV_WorkSpace_Linux/BV_WorkSpace-main_v7/editor/editor_data.cpp",
+        "fix_marker": "v5.11_editor_fix",
+        "launch_script": "/home/bv/code/godot_ui_linux/run_editor_cloud_ros2.sh",
+        "ui_script": "/home/bv/code/godot_ui_linux/ui.py",
+        "render_modes": [
+          "VULKAN_WAYLAND",
+          "VULKAN_NVIDIA",
+          "VULKAN_SOFT",
+          "GLES3_NVIDIA",
+          "OPENGL3_NVIDIA",
+          "HEADLESS"
+        ],
+        "default_render": "VULKAN_WAYLAND"
+      }
+    },
+    "godot-bridge-build": {
+      "name": "godot-bridge-build",
+      "command": "make -C /home/bv/code/godot_ui_linux/cloud_viewer clean && make -C /home/bv/code/godot_ui_linux/cloud_viewer bridge",
+      "cwd": "/home/bv/code/godot_ui_linux/cloud_viewer",
+      "description": "编译独立的 cloud_ros2_bridge 进程 (10 秒搞定)",
+      "type": "godot",
+      "extras": {
+        "binary_path": "/home/bv/code/godot_ui_linux/cloud_viewer/cloud_ros2_bridge"
+      }
     },
     "cmake-build": {
       "name": "cmake-build",
       "command": "cmake --build build --config Release",
       "cwd": ".",
-      "description": "示例：使用 CMake 构建 build 目录"
-    },
-    "123": {
-      "name": "123",
-      "command": "",
-      "cwd": ".",
-      "description": ""
+      "description": "示例：使用 CMake 构建 build 目录",
+      "type": "generic"
     }
   },
-  "last_preset": "hello-clang"
+  "last_preset": "godot-editor-build"
 }

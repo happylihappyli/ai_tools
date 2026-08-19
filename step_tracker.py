@@ -21,6 +21,7 @@
 """
 
 import sys
+import os
 import json
 import argparse
 from pathlib import Path
@@ -28,7 +29,19 @@ from typing import Dict, List, Optional
 
 # ===== 常量与配置 =====
 APP_DIR = Path(__file__).parent
-DATA_FILE = APP_DIR / "step_data.json"
+DEFAULT_DATA_FILE = APP_DIR / "step_data.json"
+
+
+def _resolve_data_file() -> Path:
+    """解析数据文件路径: env TRACKER_DATA_FILE > 默认。"""
+    env = os.environ.get("TRACKER_DATA_FILE")
+    if env:
+        return Path(env).expanduser().resolve()
+    return DEFAULT_DATA_FILE
+
+
+# 模块加载时解析一次 (支持 env); 之后 set_data_file() / 全局赋值可改
+DATA_FILE = _resolve_data_file()
 
 # 暗色系主题色
 COLOR_BG = "#1e1e2e"           # 主背景（深紫黑）
@@ -47,8 +60,11 @@ COLOR_ACCENT = "#0d9488"
 class StepData:
     """步骤数据管理，负责加载/保存 JSON 数据。"""
 
-    def __init__(self, data_file: Path = DATA_FILE):
-        """初始化数据管理器，加载已有数据或创建默认数据。"""
+    def __init__(self, data_file: Optional[Path] = None):
+        """初始化数据管理器，加载已有数据或创建默认数据。
+        data_file 为 None 时用模块全局 DATA_FILE (支持运行时修改)。"""
+        if data_file is None:
+            data_file = DATA_FILE  # 读全局, 支持 CLI/env 覆盖
         self.data_file = data_file
         self.data: Dict = {}
         self.load()
@@ -59,6 +75,9 @@ class StepData:
             try:
                 with open(self.data_file, "r", encoding="utf-8") as f:
                     self.data = json.load(f)
+                # 兼容老数据: 没 events 字段就补
+                if "events" not in self.data:
+                    self.data["events"] = []
             except (json.JSONDecodeError, OSError):
                 self.data = self._default_data()
         else:
@@ -77,6 +96,7 @@ class StepData:
             "main_goal": "",
             "current_node": None,
             "nodes": [],
+            "events": [],
         }
 
     # --- 主目标 ---
@@ -135,6 +155,10 @@ class StepData:
         self.update_node(node_id, status="in_progress")
         self.save()
 
+    def get_current(self) -> Optional[str]:
+        """获取当前节点 id，没有则返回 None。"""
+        return self.data.get("current_node")
+
     def get_node(self, node_id: str) -> Optional[Dict]:
         """按 id 获取节点，找不到返回 None。"""
         for n in self.data["nodes"]:
@@ -148,17 +172,65 @@ class StepData:
 
 
 # ===== GUI 部分 =====
-# 集中导入 GUI 所需的所有 PySide6 模块（放在类外便于静态分析 + 单元测试）
-from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QLineEdit, QTextEdit, QPushButton, QGraphicsView,
-    QGraphicsScene, QGraphicsItem, QGraphicsPathItem, QMenu, QInputDialog,
-    QMessageBox, QSplitter, QStatusBar, QToolBar
-)
-from PySide6.QtCore import Qt, QRectF, QPointF
-from PySide6.QtGui import (
-    QPainter, QColor, QPen, QBrush, QFont, QAction, QPainterPath
-)
+# GUI 依赖: 通过 _qt_compat 自动选 PySide6 / PyQt5 / PySide2
+# 如果都没有, 给占位类 (CLI 仍可工作)
+try:
+    from _qt_compat import (
+        gui_available,
+        QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+        QLabel, QLineEdit, QTextEdit, QPushButton, QGraphicsView,
+        QGraphicsScene, QGraphicsItem, QGraphicsPathItem, QMenu, QInputDialog,
+        QMessageBox, QSplitter, QStatusBar, QToolBar, QListWidget, QListWidgetItem,
+        QComboBox, QBrush,
+        Qt, QRectF, QPointF, QTimer,
+        QPainter, QColor, QPen, QFont, QAction, QPainterPath
+    )
+    _GUI_AVAILABLE = gui_available()
+except ImportError:
+    _GUI_AVAILABLE = False
+    # 占位类: 任何属性 / 调用都返回自身 (用于惰性报错)
+    def _make_stub(name):
+        class _Stub:
+            def __init__(self, *a, **kw): pass
+            def __getattr__(self, name): return _stub_instance
+            def __call__(self, *a, **kw): return _stub_instance
+            def __repr__(self): return f"<{name}-Stub (Qt missing)>"
+        _Stub.__name__ = name
+        return _Stub
+    _stub_instance = object()
+    QApplication = _make_stub("QApplication")
+    QMainWindow = _make_stub("QMainWindow")
+    QWidget = _make_stub("QWidget")
+    QVBoxLayout = _make_stub("QVBoxLayout")
+    QHBoxLayout = _make_stub("QHBoxLayout")
+    QLabel = _make_stub("QLabel")
+    QLineEdit = _make_stub("QLineEdit")
+    QTextEdit = _make_stub("QTextEdit")
+    QPushButton = _make_stub("QPushButton")
+    QGraphicsView = _make_stub("QGraphicsView")
+    QGraphicsScene = _make_stub("QGraphicsScene")
+    QGraphicsItem = _make_stub("QGraphicsItem")
+    QGraphicsPathItem = _make_stub("QGraphicsPathItem")
+    QMenu = _make_stub("QMenu")
+    QInputDialog = _make_stub("QInputDialog")
+    QMessageBox = _make_stub("QMessageBox")
+    QSplitter = _make_stub("QSplitter")
+    QStatusBar = _make_stub("QStatusBar")
+    QToolBar = _make_stub("QToolBar")
+    QListWidget = _make_stub("QListWidget")
+    QListWidgetItem = _make_stub("QListWidgetItem")
+    QComboBox = _make_stub("QComboBox")
+    QBrush = _make_stub("QBrush")
+    Qt = _make_stub("Qt")
+    QRectF = _make_stub("QRectF")
+    QPointF = _make_stub("QPointF")
+    QTimer = _make_stub("QTimer")
+    QPainter = _make_stub("QPainter")
+    QColor = _make_stub("QColor")
+    QPen = _make_stub("QPen")
+    QFont = _make_stub("QFont")
+    QAction = _make_stub("QAction")
+    QPainterPath = _make_stub("QPainterPath")
 
 
 class NodeItem(QGraphicsItem):
@@ -362,6 +434,9 @@ class FlowView(QGraphicsView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        # 禁用默认 context menu (我们用双击节点弹自定义菜单)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+        self.setAcceptDrops(False)
         self._scale = 1.0
         # pan 状态
         self._panning = False
@@ -382,6 +457,8 @@ class FlowView(QGraphicsView):
             self._pan_pressed_button = event.button()
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             self.viewport().grabMouse()  # 确保即使移出节点也能持续收到 move
+            if self.main_window and self.main_window.statusBar():
+                self.main_window.statusBar().showMessage("✋ Pan 模式 (拖动即可, 释放退出)", 0)
             event.accept()
             return
         super().mousePressEvent(event)
@@ -408,6 +485,11 @@ class FlowView(QGraphicsView):
             self._pan_pressed_button = None
             self.setCursor(Qt.CursorShape.ArrowCursor)
             self.viewport().releaseMouse()
+            if self.main_window and self.main_window.statusBar():
+                self.main_window.statusBar().showMessage(
+                    "就绪 · 左键拖节点 · 右键 pan · 滚轮缩放 · 🎯 居中 / 🔍 查找节点 (C / Ctrl+F)",
+                    5000
+                )
             event.accept()
             return
         super().mouseReleaseEvent(event)
@@ -486,8 +568,17 @@ class MainWindow(QMainWindow):
         tb.addAction("▶ 设为当前", self.set_selected_current)
         tb.addAction("🗑 删除", self.delete_selected)
         tb.addSeparator()
+        tb.addAction("🎯 居中", self.center_view)            # C
+        tb.addAction("🔍 查找节点", self.find_node)           # Ctrl+F
+        tb.addSeparator()
         tb.addAction("🔄 刷新", self.render_all)
         tb.addAction("📋 命令行用法", self.show_help)
+
+        # 快捷键: 居中 / 查找
+        from _qt_compat import QShortcut, QKeySequence
+        QShortcut(QKeySequence("C"), self, activated=self.center_view)
+        QShortcut(QKeySequence("Ctrl+F"), self, activated=self.find_node)
+        QShortcut(QKeySequence("Home"), self, activated=self.fit_all_nodes)
 
         # 主分割：左画布 / 右详情
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -498,10 +589,12 @@ class MainWindow(QMainWindow):
         self.view = FlowView(self.scene, self)
         splitter.addWidget(self.view)
 
-        # 右侧详情
+        # 右侧详情 + 事件日志 (上下分割)
         right = QWidget()
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(8, 8, 8, 8)
+
+        # 详情区域
         self.detail_title = QLabel("请选中一个节点")
         self.detail_title.setFont(QFont("Microsoft YaHei", 14, QFont.Weight.Bold))
         right_layout.addWidget(self.detail_title)
@@ -522,9 +615,71 @@ class MainWindow(QMainWindow):
         self.detail_next.setWordWrap(True)
         right_layout.addWidget(self.detail_next)
 
+        # 分割: 详情 / 事件日志
+        right_splitter = QSplitter(Qt.Orientation.Vertical)
+        # 包一层 widget, 让 detail + next 一起放进上半部
+        top_right = QWidget()
+        top_right_layout = QVBoxLayout(top_right)
+        top_right_layout.setContentsMargins(0, 0, 0, 0)
+        # 把 right_layout 中已加的 detail 控件先 "搬" 到 top_right
+        # 简单做法: 重新建一遍 (保留引用)
+        top_right_layout.addWidget(self.detail_title)
+        top_right_layout.addWidget(self.detail_id)
+        top_right_layout.addWidget(self.detail_status)
+        desc_lbl = QLabel("描述:")
+        top_right_layout.addWidget(desc_lbl)
+        top_right_layout.addWidget(self.detail_desc, 1)
+        top_right_layout.addWidget(self.detail_next)
+        # 清空 right_layout
+        while right_layout.count():
+            item = right_layout.takeAt(0)
+            if item.widget():
+                item.widget().setParent(None)
+        right_splitter.addWidget(top_right)
+
+        # 事件日志面板
+        ev_panel = QWidget()
+        ev_layout = QVBoxLayout(ev_panel)
+        ev_layout.setContentsMargins(0, 4, 0, 0)
+        ev_layout.setSpacing(4)
+
+        ev_header = QHBoxLayout()
+        ev_header.addWidget(QLabel("📜 事件日志:"))
+        self.event_filter_combo = QComboBox()
+        self.event_filter_combo.addItem("全部")
+        self.event_filter_combo.addItems([
+            "compile_start", "compile_finish", "compile_fail",
+            "clean", "deep_clean", "touch", "diagnose", "launch",
+            "info", "error"
+        ])
+        self.event_filter_combo.currentIndexChanged.connect(self._refresh_events)
+        ev_header.addWidget(self.event_filter_combo, 1)
+        btn_clear_ev = QPushButton("🧹 清空")
+        btn_clear_ev.clicked.connect(self._clear_events)
+        ev_header.addWidget(btn_clear_ev)
+        ev_layout.addLayout(ev_header)
+
+        self.event_list = QListWidget()
+        self.event_list.setFont(QFont("Consolas", 9))
+        ev_layout.addWidget(self.event_list, 1)
+
+        right_splitter.addWidget(ev_panel)
+        right_splitter.setSizes([350, 250])
+
         right.setStyleSheet(f"background: {COLOR_PANEL};")
+        right_layout.addWidget(right_splitter)
+
         splitter.addWidget(right)
-        splitter.setSizes([900, 380])
+        splitter.setSizes([820, 460])
+
+        # 启动定时器: 每 2 秒刷一次事件 (其他工具在写, 这里轮询拉)
+        self._event_timer = QTimer(self)
+        self._event_timer.timeout.connect(self._refresh_events)
+        self._event_timer.start(2000)
+        # 记录上次事件 id, 只在新增时追加
+        self._last_event_id = 0
+        # 初次填充
+        self._refresh_events()
 
         # 总布局
         central = QWidget()
@@ -869,6 +1024,105 @@ class MainWindow(QMainWindow):
                 return
         QMessageBox.information(self, "提示", "请先在画布上选中一个节点")
 
+    # ---- 视图导航 (居中 / 查找) ----
+    def center_on_node(self, node_id: str, animate: bool = True) -> bool:
+        """将视图居中到指定节点。返回是否成功。"""
+        item = self.node_items.get(node_id)
+        if not item:
+            self.statusBar().showMessage(f"⚠ 找不到节点 #{node_id}", 3000)
+            return False
+        # 节点中心 (scene 坐标)
+        center = item.scenePos()
+        if animate:
+            # 用 transform 动画平滑滚到目标
+            self._animate_center_to(center)
+        else:
+            self.view.centerOn(center)
+        # 选中并确保可见
+        self.scene.clearSelection()
+        item.setSelected(True)
+        self.on_node_clicked(node_id)
+        return True
+
+    def _animate_center_to(self, scene_pos: QPointF, duration_ms: int = 280) -> None:
+        """平滑居中动画 (用 QTimer 插值 60 帧)."""
+        from _qt_compat import QTimer
+        # 拿当前 view 中心
+        cur = self.view.mapToScene(self.view.viewport().rect().center())
+        end = scene_pos
+        steps = max(1, duration_ms // 16)
+        step_n = [0]
+
+        def tick():
+            step_n[0] += 1
+            t = min(1.0, step_n[0] / steps)
+            # ease-out
+            t2 = 1 - (1 - t) ** 2
+            x = cur.x() + (end.x() - cur.x()) * t2
+            y = cur.y() + (end.y() - cur.y()) * t2
+            self.view.centerOn(x, y)
+            if t >= 1.0:
+                timer.stop()
+
+        timer = QTimer(self)
+        timer.timeout.connect(tick)
+        timer.start(16)
+
+    def center_view(self) -> None:
+        """🎯 居中: 优先选中节点 → 当前节点 → 所有节点。"""
+        # 1. 选中的节点
+        for item in self.scene.selectedItems():
+            if isinstance(item, NodeItem):
+                self.center_on_node(item.node["id"])
+                return
+        # 2. 当前节点
+        cur = self.step_data.get_current()
+        if cur and self.center_on_node(cur):
+            return
+        # 3. 所有节点 (fit)
+        self.fit_all_nodes()
+
+    def fit_all_nodes(self) -> None:
+        """把所有节点都框进视图 (Home 键)."""
+        if not self.node_items:
+            self.statusBar().showMessage("画布为空", 3000)
+            return
+        rect = self.scene.itemsBoundingRect().adjusted(-60, -60, 60, 60)
+        self.view.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
+        self.statusBar().showMessage(f"📐 已显示全部 {len(self.node_items)} 个节点", 3000)
+
+    def find_node(self) -> None:
+        """🔍 查找节点 (按 id / 标题模糊搜索), 回车跳转。"""
+        items = list(self.node_items.keys())
+        if not items:
+            QMessageBox.information(self, "提示", "画布上没有节点")
+            return
+        # 准备候选项 (id + title)
+        candidates = []
+        for nid, item in self.node_items.items():
+            title = item.node.get("title", "")
+            candidates.append((nid, title))
+            candidates.append((f"#{nid} {title}", nid))
+        # 用 QInputDialog 拿输入
+        from _qt_compat import QInputDialog
+        query, ok = QInputDialog.getText(
+            self, "查找节点", "输入节点 id 或标题 (模糊匹配):",
+            text=""
+        )
+        if not ok or not query.strip():
+            return
+        query = query.strip().lower()
+        # 优先精确匹配 id
+        if query in self.node_items:
+            self.center_on_node(query)
+            return
+        # 模糊匹配 id 或 title
+        for nid, title in self.node_items.items():
+            if query in nid.lower() or query in title.lower():
+                self.center_on_node(nid)
+                return
+        self.statusBar().showMessage(f"⚠ 没找到匹配 \"{query}\" 的节点", 4000)
+
     def show_help(self) -> None:
         """显示命令行用法帮助。"""
         QMessageBox.information(self, "命令行用法",
@@ -878,16 +1132,72 @@ class MainWindow(QMainWindow):
             "  python step_tracker.py update --id 1 --status in_progress\n"
             "  python step_tracker.py current 1\n"
             "  python step_tracker.py delete 1\n"
-            "  python step_tracker.py list")
+            "  python step_tracker.py list\n\n"
+            "事件日志:\n"
+            "  python step_tracker.py events [--limit 50] [--type compile_start]\n"
+            "  python step_tracker.py event <type> <title> [--desc ...] [--node ID]\n"
+            "  python step_tracker.py clear-events")
+
+    # ---- 事件日志 ----
+    def _refresh_events(self) -> None:
+        """从 step_data.json 拉取事件, 刷新到事件列表。"""
+        # 重新加载数据 (其他进程可能改了)
+        self.step_data.load()
+        events = list(self.step_data.data.get("events", []))
+        # 类型过滤
+        ftype = self.event_filter_combo.currentText() if hasattr(self, "event_filter_combo") else "全部"
+        if ftype and ftype != "全部":
+            events = [e for e in events if e.get("type") == ftype]
+        # 新→旧, 限 200 条
+        events = list(reversed(events[-200:]))
+        # 重建列表 (数量不大, 全量重建简单可靠)
+        self.event_list.clear()
+        for e in events:
+            node_tag = f" [#{e['node_id']}]" if e.get("node_id") else ""
+            desc = f"  — {e['desc']}" if e.get("desc") else ""
+            text = f"{e['ts']}  [{e['type']}]{node_tag}  {e['title']}{desc}"
+            item = QListWidgetItem(text)
+            # 按类型上色
+            color = {
+                "compile_start": "#0d9488",
+                "compile_finish": "#10b981",
+                "compile_fail": "#ef4444",
+                "clean": "#94a3b8",
+                "deep_clean": "#a78bfa",
+                "touch": "#fbbf24",
+                "diagnose": "#f97316",
+                "launch": "#3b82f6",
+                "error": "#ef4444",
+                "info": "#94a3b8",
+            }.get(e.get("type"), "#cbd5e1")
+            item.setForeground(QColor(color))
+            self.event_list.addItem(item)
+
+    def _clear_events(self) -> None:
+        """清空事件日志 (带确认)。"""
+        ret = QMessageBox.question(self, "确认", "清空所有事件日志?")
+        if ret == QMessageBox.StandardButton.Yes:
+            self.step_data.data["events"] = []
+            self.step_data.save()
+            self._refresh_events()
+            self.statusBar().showMessage("🧹 事件已清空", 3000)
 
 
 def run_gui() -> None:
-    """启动 PySide6 图形界面。"""
+    """启动图形界面 (PySide6 / PyQt5 / PySide2 多后端兼容)."""
+    import _qt_compat
+    if not _qt_compat.gui_available():
+        sys.stderr.write(
+            "✗ 没找到任何 Qt 后端 (PySide6 / PyQt5 / PySide2)\n"
+            "  安装: pip install --user PySide6  (或 apt install python3-pyqt5)\n"
+        )
+        sys.exit(1)
+    sys.stderr.write(f"[step_tracker] using {_qt_compat.QT_BACKEND}\n")
     # 启动应用
     app = QApplication(sys.argv)
     win = MainWindow()
     win.show()
-    sys.exit(app.exec())
+    sys.exit(getattr(app, _qt_compat.APP_EXEC)())
 
 
 # ===== CLI 部分 =====
@@ -897,6 +1207,9 @@ def run_cli(args: List[str]) -> int:
         prog="step_tracker.py",
         description="步骤跟踪工具 CLI - 供 AI 或脚本调用",
     )
+    parser.add_argument("--data-file", default=None,
+                        help="step_data.json 路径 (默认 /home/bv/code/ai_tools/step_data.json, "
+                             "也可用 env TRACKER_DATA_FILE)")
     sub = parser.add_subparsers(dest="cmd")
 
     # gui
@@ -943,7 +1256,30 @@ def run_cli(args: List[str]) -> int:
     p_show = sub.add_parser("show", help="查看节点详情")
     p_show.add_argument("id")
 
+    # ===== 事件日志子命令 =====
+    p_ev_list = sub.add_parser("events", help="列最近事件 (新→旧)")
+    p_ev_list.add_argument("--limit", type=int, default=50)
+    p_ev_list.add_argument("--type", default=None)
+
+    p_ev_add = sub.add_parser("event", help="追加一条事件")
+    p_ev_add.add_argument("type", help="事件类型")
+    p_ev_add.add_argument("title", help="事件标题")
+    p_ev_add.add_argument("--desc", default="")
+    p_ev_add.add_argument("--node", default=None)
+
+    p_ev_clear = sub.add_parser("clear-events", help="清空事件日志")
+
     parsed = parser.parse_args(args)
+
+    # 全局: --data-file 覆盖 (优先 CLI > env TRACKER_DATA_FILE > 默认)
+    global DATA_FILE
+    if parsed.data_file:
+        DATA_FILE = Path(parsed.data_file).expanduser().resolve()
+    elif os.environ.get("TRACKER_DATA_FILE"):
+        DATA_FILE = Path(os.environ["TRACKER_DATA_FILE"]).expanduser().resolve()
+    if parsed.data_file or os.environ.get("TRACKER_DATA_FILE"):
+        print(f"📁 数据文件: {DATA_FILE}", file=sys.stderr)
+
     sd = StepData()
 
     if parsed.cmd in (None, "gui"):
@@ -954,9 +1290,10 @@ def run_cli(args: List[str]) -> int:
         nodes = sd.list_nodes()
         goal = sd.data.get("main_goal", "")
         cur = sd.data.get("current_node")
+        evs = sd.data.get("events", [])
         print(f"主目标: {goal or '（未设置）'}")
         print(f"当前节点: #{cur}" if cur else "当前节点: （无）")
-        print(f"共 {len(nodes)} 个节点:")
+        print(f"共 {len(nodes)} 个节点, {len(evs)} 条事件:")
         for n in nodes:
             mark = " ▶" if n["id"] == cur else ""
             print(f"  #{n['id']} [{n['status']}] {n['title']}{mark}")
@@ -1028,6 +1365,42 @@ def run_cli(args: List[str]) -> int:
         print(f"  状态: {n['status']}")
         print(f"  描述: {n.get('description', '（无）')}")
         print(f"  后续: {', '.join(n.get('next', [])) or '（无）'}")
+        return 0
+
+    if parsed.cmd == "events":
+        events = list(sd.data.get("events", []))
+        if parsed.type:
+            events = [e for e in events if e.get("type") == parsed.type]
+        events = list(reversed(events[-parsed.limit:]))
+        print(f"共 {len(events)} 条事件 (新→旧):")
+        for e in events:
+            node = f" [#{e['node_id']}]" if e.get("node_id") else ""
+            desc = f"  — {e['desc']}" if e.get("desc") else ""
+            print(f"  #{e['id']:>4} {e['ts']}  [{e['type']}]{node}  {e['title']}{desc}")
+        return 0
+
+    if parsed.cmd == "event":
+        evs = sd.data.setdefault("events", [])
+        next_id = (max((e["id"] for e in evs), default=0)) + 1
+        from datetime import datetime
+        evs.append({
+            "id": next_id,
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "type": parsed.type,
+            "title": parsed.title,
+            "desc": parsed.desc,
+            "node_id": parsed.node,
+        })
+        if len(evs) > 200:
+            sd.data["events"] = evs[-200:]
+        sd.save()
+        print(f"✓ 已记录事件 #{next_id}: [{parsed.type}] {parsed.title}")
+        return 0
+
+    if parsed.cmd == "clear-events":
+        sd.data["events"] = []
+        sd.save()
+        print("🧹 事件日志已清空")
         return 0
 
     parser.print_help()

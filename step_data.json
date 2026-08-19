@@ -1,6 +1,136 @@
 {
-  "main_goal": "实现一个步骤跟踪工具",
-  "current_node": "3",
+  "main_goal": "Godot 4.5 + ROS2 Jazzy 集成 (v5.11 重构)",
+  "current_node": "v5_11_rebuild",
+  "events": [
+    {
+      "id": 1,
+      "ts": "2026-08-18T16:30:40",
+      "type": "diagnose",
+      "title": "scons 诊断",
+      "desc": "src=/home/bv/code/BV_WorkSpace_Linux/BV_WorkSpace-main_v7 ",
+      "node_id": "v5_11_rebuild"
+    },
+    {
+      "id": 2,
+      "ts": "2026-08-18T16:30:45",
+      "type": "clean",
+      "title": "Clean (.sconsign5 + .o)",
+      "desc": "删 1 个文件 in /home/bv/code/BV_WorkSpace_Linux/BV_WorkSpace-main_v7",
+      "node_id": "v5_11_rebuild"
+    },
+    {
+      "id": 3,
+      "ts": "2026-08-18T16:30:47",
+      "type": "touch",
+      "title": "Touch editor_data.cpp (16:30:47)",
+      "desc": "/home/bv/code/BV_WorkSpace_Linux/BV_WorkSpace-main_v7/editor/editor_data.cpp",
+      "node_id": "v5_11_rebuild"
+    },
+    {
+      "id": 4,
+      "ts": "2026-08-18T16:30:50",
+      "type": "launch",
+      "title": "启动 Godot (VULKAN_WAYLAND, editor)",
+      "desc": "/home/bv/code/godot_ui_linux/run_editor_cloud_ros2.sh",
+      "node_id": "v5_11_rebuild"
+    },
+    {
+      "id": 5,
+      "ts": "2026-08-18T16:30:52",
+      "type": "clean",
+      "title": "Clean (.sconsign5 + .o)",
+      "desc": "删 0 个文件 in /home/bv/code/godot_ui_linux/cloud_viewer",
+      "node_id": "v5_11_rebuild"
+    },
+    {
+      "id": 6,
+      "ts": "2026-08-18T16:31:11",
+      "type": "info",
+      "title": "添加预设 self-test-preset",
+      "desc": "echo hello-self-test",
+      "node_id": "v5_11_rebuild"
+    },
+    {
+      "id": 7,
+      "ts": "2026-08-18T16:31:11",
+      "type": "info",
+      "title": "删除预设 self-test-preset",
+      "desc": "",
+      "node_id": "v5_11_rebuild"
+    },
+    {
+      "id": 8,
+      "ts": "2026-08-18T16:31:13",
+      "type": "compile_start",
+      "title": "开始编译",
+      "desc": "echo hello-cli-test && exit 0",
+      "node_id": "v5_11_rebuild"
+    },
+    {
+      "id": 9,
+      "ts": "2026-08-18T16:31:13",
+      "type": "compile_finish",
+      "title": "✓ 编译结束 (cmd)",
+      "desc": "耗时 104ms · 错误 0 · 警告 0",
+      "node_id": "v5_11_rebuild"
+    },
+    {
+      "id": 10,
+      "ts": "2026-08-18T16:31:13",
+      "type": "compile_start",
+      "title": "开始编译",
+      "desc": "false",
+      "node_id": "v5_11_rebuild"
+    },
+    {
+      "id": 11,
+      "ts": "2026-08-18T16:31:14",
+      "type": "compile_fail",
+      "title": "✗ 编译结束 (cmd)",
+      "desc": "耗时 104ms · 错误 0 · 警告 0",
+      "node_id": "v5_11_rebuild"
+    },
+    {
+      "id": 12,
+      "ts": "2026-08-18T16:31:56",
+      "type": "test",
+      "title": "手动事件测试",
+      "desc": "this is a test event",
+      "node_id": null
+    },
+    {
+      "id": 13,
+      "ts": "2026-08-18T16:31:58",
+      "type": "diagnose",
+      "title": "scons 诊断",
+      "desc": "src=/home/bv/code/BV_WorkSpace_Linux/BV_WorkSpace-main_v7 ",
+      "node_id": "v5_11_rebuild"
+    },
+    {
+      "id": 14,
+      "ts": "2026-08-18T16:53:38",
+      "type": "touch",
+      "title": "Touch editor_data.cpp (16:53:38)",
+      "desc": "/home/bv/code/BV_WorkSpace_Linux/BV_WorkSpace-main_v7/editor/editor_data.cpp",
+      "node_id": "v5_11_rebuild"
+    },
+    {
+      "id": 15,
+      "ts": "2026-08-18T16:55:01",
+      "type": "diagnose",
+      "title": "scons 诊断",
+      "desc": "src=/home/bv/code/BV_WorkSpace_Linux/BV_WorkSpace-main_v7 ",
+      "node_id": "v5_11_rebuild"
+    },
+    {
+      "id": 16,
+      "ts": "2026-08-19T14:43:40",
+      "type": "detached_start",
+      "title": "启动 detached: godot-editor-build",
+      "desc": "daemon pid=1299907\nlog=/home/bv/code/godot_ui_linux/.ai_tools/build_logs/daemon_build_20260819_144340.log",
+      "node_id": "v5_11_rebuild"
+    }
+  ],
   "nodes": [
     {
       "id": "1",
@@ -53,6 +183,71 @@
       "x": 272.8449749999998,
       "y": 313.07211874999996,
       "next": []
+    },
+    {
+      "id": "v5_9",
+      "title": "v5.9: 修 EXIT_TREE 不杀 bridge",
+      "description": "v5.9 修复: cloud_viewer_native.cpp:774 EXIT_TREE 不再 _stop_bridge_process, bridge 持续存活",
+      "status": "completed",
+      "x": 0,
+      "y": 0,
+      "next": [
+        "v5_10"
+      ]
+    },
+    {
+      "id": "v5_10",
+      "title": "v5.10: ui.py 集成 ROS2 publisher + 测试",
+      "description": "v5.10: cmd_v5_test + v5 按钮 + --auto-v5 + mock_pcd monkey-patch",
+      "status": "completed",
+      "x": 0,
+      "y": 0,
+      "next": [
+        "v5_11",
+        "v5_tools"
+      ]
+    },
+    {
+      "id": "v5_11",
+      "title": "v5.11: 修 editor_data.cpp 越界 SIGSEGV",
+      "description": "v5.11: editor_data.cpp:762-777 显式 if 检查 + return nullptr (不再依赖 ERR_FAIL 宏的 noop)",
+      "status": "completed",
+      "x": 0,
+      "y": 0,
+      "next": [
+        "v5_11_rebuild"
+      ]
+    },
+    {
+      "id": "v5_11_rebuild",
+      "title": "v5.11: 重编含 fix 的 binary",
+      "description": "需要 touch editor_data.cpp 或删 sconsign5.dblite 后重链 binary",
+      "status": "in_progress",
+      "x": 0,
+      "y": 0,
+      "next": [
+        "v5_11_editor"
+      ]
+    },
+    {
+      "id": "v5_11_editor",
+      "title": "v5.11: 启 editor 模式成功",
+      "description": "USE_EDITOR=yes 启 godot editor, 不再 SIGSEGV",
+      "status": "pending",
+      "x": 0,
+      "y": 0,
+      "next": []
+    },
+    {
+      "id": "v5_tools",
+      "title": "v5.11: build_gui_qt → compile_tool + tracker_rec",
+      "description": "compile_tool.py 集成 build_gui_qt.py + tracker_rec + 事件面板. CLI godot 子命令 (clean/deep_clean/touch/diagnose/launch/launch-ui) + run/add-preset/del-preset 全部带 _track. 11 条事件验证通过",
+      "status": "completed",
+      "x": 0,
+      "y": 0,
+      "next": [
+        "v5_11_editor"
+      ]
     }
   ]
 }
