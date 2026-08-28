@@ -591,6 +591,13 @@ class CompileExecutor:
 
 
 # ===== GUI (PySide6/PyQt5 兼容) =====
+# 不可用时给占位 class — 让 class 定义能解析, 运行时由 _GUI_AVAILABLE 控制
+class _MockQt:
+    def __init__(self, *a, **kw): pass
+    def __getattr__(self, _): return _MockQt()
+    def __call__(self, *a, **kw): return _MockQt()
+
+_Item = _MockQt
 try:
     from _qt_compat import (
         gui_available, QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -604,6 +611,46 @@ try:
     _GUI_AVAILABLE = gui_available()
 except ImportError:
     _GUI_AVAILABLE = False
+    QApplication = _Item
+    QMainWindow = _Item
+    QWidget = _Item
+    QVBoxLayout = _Item
+    QHBoxLayout = _Item
+    QLabel = _Item
+    QLineEdit = _Item
+    QPushButton = _Item
+    QTextEdit = _Item
+    QProgressBar = _Item
+    QComboBox = _Item
+    QListWidget = _Item
+    QListWidgetItem = _Item
+    QColor = _Item
+    QFont = _Item
+    Qt = _Item
+    QTimer = _Item
+    QFileDialog = _Item
+    QMessageBox = _Item
+    QSplitter = _Item
+    QFrame = _Item
+    QTreeWidget = _Item
+    QTreeWidgetItem = _Item
+    QTabWidget = _Item
+    QGraphicsView = _Item
+    QGraphicsScene = _Item
+    QGraphicsEllipseItem = _Item
+    QGraphicsPathItem = _Item
+    QGraphicsTextItem = _Item
+    QGraphicsItem = _Item
+    QPainterPath = _Item
+    QPen = _Item
+    QBrush = _Item
+    QPointF = _Item
+    QObject = _Item
+    Signal = _Item
+    Slot = _Item
+    QPainter = _Item
+    APP_EXEC = "exec_"
+    QT_BACKEND = "none"
 
 
 class TaskNodeItem(QGraphicsEllipseItem):

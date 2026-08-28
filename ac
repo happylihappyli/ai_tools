@@ -36,13 +36,102 @@ def load_local_config():
 
 def main() -> int:
     local_config = load_local_config()
-    
+
     args = sys.argv[1:]
-    
+
+    # help / -h / --help — 不启动 GUI, 直接打印用法 (沙箱里 GUI 起不来)
+    if args and args[0] in ("help", "-h", "--help"):
+        print(__doc__)
+        print("通用用法:")
+        print("    ac                          # 启动 GUI (当前目录有 ai_build.json 时自动加载)")
+        print("    ac --cwd <dir> --cmd <c>    # GUI 预填参数")
+        print("    ac --test \"./run.sh\"        # GUI 预填测试命令")
+        print("    ac --offscreen              # 用 Python 版 (compile_tool.py), 不开 C++ GUI")
+        print("    ac help                     # 打印本帮助")
+        print()
+        print("ai_build.json 字段:")
+        print("    cwd: 默认工作目录")
+        print("    cmd: 默认编译命令")
+        print("    test: 测试命令")
+        print("    tasks: [{name, cmd, desc}] 任务列表 (链式任务)")
+        print("    auto: [\"build+deploy\", \"diag\"]  无参数时自动跑的任务名 (顺序)")
+        return 0
+
+    # ====================================================================
+    # --task <name> → 跑 ai_build.json 里 task 的 cmd
+    # ====================================================================
+    # 设计: 兼容 compile_tool.py 的 --task, 但 ac 自己消费, 跑 ai_build.json 的 task
+    if "--task" in args or "-t" in args:
+        tasks_list = local_config.get("tasks", [])
+        tasks_map = {t.get("name"): t for t in tasks_list if t.get("name")}
+        # 解析 --task 后的 value
+        task_name = None
+        i = 0
+        while i < len(args):
+            if args[i] in ("--task", "-t") and i + 1 < len(args):
+                task_name = args[i + 1]
+                break
+            i += 1
+        if not task_name:
+            print("❌ --task 需要指定任务名", file=sys.stderr)
+            return 1
+        if task_name not in tasks_map:
+            print(f"❌ ai_build.json 里没有任务 '{task_name}'", file=sys.stderr)
+            print(f"   可用: {list(tasks_map.keys())}", file=sys.stderr)
+            return 1
+        cmd = tasks_map[task_name].get("cmd", "")
+        if not cmd:
+            print(f"❌ 任务 '{task_name}' 的 cmd 为空", file=sys.stderr)
+            return 1
+        print(f"[AC-TASK] === {task_name} ===")
+        print(f"[AC-TASK] $ {cmd}")
+        env = os.environ.copy()
+        env["QT_QPA_PLATFORM"] = "offscreen"
+        rc = subprocess.call(["bash", "-c", cmd], env=env)
+        print(f"[AC-TASK] {task_name} 退出码 = {rc}")
+        return rc
+
+    # ====================================================================
+    # 无参数 + 有 ai_build.json → 自动跑 build+test (驾驶舱模式)
+    # ====================================================================
+    # 设计: 跑 `ac` 不带任何参数, 默认行为 = 编译 + 测试, 不弹 GUI.
+    #   - auto 字段: list of task name, 顺序执行
+    #   - auto 缺省: ["build+deploy", "diag"] (从 ai_build.json 的 tasks 里找)
+    #   - 加 --gui 强制弹 C++ GUI (覆盖 auto 模式)
+    if not args and local_config:
+        auto_tasks = local_config.get("auto") or ["build+deploy", "diag"]
+        tasks = {t.get("name"): t for t in local_config.get("tasks", []) if t.get("name")}
+        # 优先 tasks 数组; 如果 task name 不在 tasks, 当成 shell 命令
+        cmds_to_run = []
+        for name in auto_tasks:
+            if name in tasks:
+                cmds_to_run.append((name, tasks[name].get("cmd", "")))
+            else:
+                # fallback: 当成普通 shell 命令
+                cmds_to_run.append((name, name))
+        if cmds_to_run:
+            print(f"[AC-AUTO] 无参数启动, 跑 auto 链: {[n for n, _ in cmds_to_run]}")
+            env = os.environ.copy()
+            env["QT_QPA_PLATFORM"] = "offscreen"
+            for name, cmd in cmds_to_run:
+                if not cmd:
+                    print(f"[AC-AUTO] 跳过 {name} (cmd 为空)")
+                    continue
+                print(f"\n[AC-AUTO] === {name} ===")
+                print(f"[AC-AUTO] $ {cmd}")
+                # 用 bash -c 强制 bash (默认 sh 不支持 $(...) 替换, 进程替换, 数组等)
+                rc = subprocess.call(["bash", "-c", cmd], env=env)
+                print(f"[AC-AUTO] {name} 退出码 = {rc}")
+                if rc != 0:
+                    print(f"[AC-AUTO] {name} 失败, 停止后续 auto 任务")
+                    return rc
+            print(f"\n[AC-AUTO] 全部 auto 任务完成 ✓")
+            return 0
+
     # 如果命令行没给 --cwd 或 -d，且配置里有，则补上
     if "--cwd" not in args and "-d" not in args and "cwd" in local_config:
         args.extend(["--cwd", local_config["cwd"]])
-    
+
     # 如果命令行没给 --cmd 或 -c，且配置里有，则补上
     if "--cmd" not in args and "-c" not in args and "cmd" in local_config:
         args.extend(["--cmd", local_config["cmd"]])
@@ -51,14 +140,44 @@ def main() -> int:
     if "--test" not in args and "-t" not in args and "test" in local_config:
         args.extend(["--test", local_config["test"]])
 
-    # 优先使用 C++ 版本 (ai_panel)
-    if CPP_PANEL.exists():
-        cmd = [str(CPP_PANEL)] + args
-    elif COMPILE_TOOL.exists():
-        cmd = [sys.executable, str(COMPILE_TOOL)] + args
+    # 优先使用 C++ 版本 (ai_panel), 但 --offscreen 强制走 Python (compile_tool.py)
+    use_python = "--offscreen" in args
+    if use_python or not CPP_PANEL.exists():
+        if not COMPILE_TOOL.exists():
+            sys.stderr.write(f"✗ 找不到编译工具 (Python 版本 compile_tool.py 也不存在)\n")
+            return 1
+        # 走 Python 模式时, ac 自己消费 --offscreen, 不外传
+        # 同时只保留 compile_tool.py 认的参数 (--cwd/--cmd/--task/--preset/--cli)
+        _CT_ALLOWED = {"--cwd", "-d", "--cmd", "-c", "--task", "--preset", "--cli", "-h", "--help"}
+        filtered = []
+        skip_next = False
+        for a in args:
+            if a == "--offscreen":
+                continue  # 吞掉
+            if skip_next:
+                # 上一项是 consume-flag (例如 --test), 跳过这个值
+                skip_next = False
+                continue
+            if a in ("--test", "-t"):
+                skip_next = True
+                continue  # compile_tool.py 不认 --test
+            filtered.append(a)
+        # 只保留 compile_tool 认的 flag
+        cleaned = []
+        i = 0
+        while i < len(filtered):
+            a = filtered[i]
+            if a in _CT_ALLOWED:
+                cleaned.append(a)
+                # 如果是 consume-flag, 下一项也保留
+                if a in ("--cwd", "-d", "--cmd", "-c", "--task", "--preset"):
+                    if i + 1 < len(filtered):
+                        cleaned.append(filtered[i + 1])
+                        i += 1
+            i += 1
+        cmd = [sys.executable, str(COMPILE_TOOL)] + cleaned
     else:
-        sys.stderr.write(f"✗ 找不到编译工具 (C++ 或 Python 版本)\n")
-        return 1
+        cmd = [str(CPP_PANEL)] + args
 
     # 透传环境 (确保 DISPLAY / WAYLAND_DISPLAY 不丢)
     env = os.environ.copy()
