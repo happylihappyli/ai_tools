@@ -1,0 +1,23 @@
+import os
+env = Environment(ENV=os.environ)
+
+# Enable C++17
+env.Append(CXXFLAGS=['-std=c++17', '-fPIC'])
+
+# Get Qt5 flags
+env.ParseConfig('pkg-config --cflags --libs Qt5Widgets Qt5Core Qt5Gui Qt5Network')
+
+# Custom MOC Builder
+moc_builder = Builder(action='moc $SOURCE -o $TARGET', suffix='.moc.cpp', src_suffix='.h')
+env.Append(BUILDERS={'Moc': moc_builder})
+
+# Source files (exclude generated moc files)
+sources = [f for f in Glob('src/*.cpp') if not str(f).endswith('.moc.cpp')]
+
+# Headers that need MOC
+headers_to_moc = ['src/main_window.h']
+for h in headers_to_moc:
+    sources.append(env.Moc(h))
+
+# Build executable
+env.Program(target='ai_panel', source=sources)

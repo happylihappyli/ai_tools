@@ -79,7 +79,9 @@ QCheckBox = None
 QColor = None
 QComboBox = None
 QFileDialog = None
+QFrame = None
 QFont = None
+QGraphicsEllipseItem = None
 QGraphicsItem = None
 QGraphicsPathItem = None
 QGraphicsScene = None
@@ -117,6 +119,8 @@ QTextCursor = None
 QTextEdit = None
 QTimer = None
 QToolBar = None
+QTreeWidget = None
+QTreeWidgetItem = None
 QVBoxLayout = None
 QWidget = None
 Qt = None
@@ -134,12 +138,12 @@ if QT_BACKEND == "pyside6":
         QPalette, QPen, QTextCursor
     )
     from PySide6.QtWidgets import (
-        QApplication, QCheckBox, QComboBox, QFileDialog, QGraphicsItem,
-        QGraphicsPathItem, QGraphicsScene, QGraphicsTextItem, QGraphicsView,
+        QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QGraphicsEllipseItem,
+        QGraphicsItem, QGraphicsPathItem, QGraphicsScene, QGraphicsTextItem, QGraphicsView,
         QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
         QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
         QProgressBar, QPushButton, QShortcut, QSizePolicy, QSplitter, QStatusBar,
-        QTabWidget, QTextEdit, QToolBar, QVBoxLayout, QWidget
+        QTabWidget, QTextEdit, QToolBar, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
     )
     PYQT_VERSION_STR = QtCore.__version__ if hasattr(QtCore, "__version__") else "6"
 
@@ -155,12 +159,12 @@ elif QT_BACKEND == "pyqt5":
     )
     # PyQt5 的 QAction 在 QtWidgets 里 (Qt6 移到 QtGui)
     from PyQt5.QtWidgets import (
-        QAction, QApplication, QCheckBox, QComboBox, QFileDialog, QGraphicsItem,
-        QGraphicsPathItem, QGraphicsScene, QGraphicsTextItem, QGraphicsView,
+        QAction, QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QGraphicsEllipseItem,
+        QGraphicsItem, QGraphicsPathItem, QGraphicsScene, QGraphicsTextItem, QGraphicsView,
         QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
         QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
         QProgressBar, QPushButton, QShortcut, QSizePolicy, QSplitter, QStatusBar,
-        QTabWidget, QTextEdit, QToolBar, QVBoxLayout, QWidget
+        QTabWidget, QTextEdit, QToolBar, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
     )
     PYQT_VERSION_STR = QtCore.PYQT_VERSION_STR
 
@@ -175,12 +179,12 @@ elif QT_BACKEND == "pyside2":
         QPen, QTextCursor
     )
     from PySide2.QtWidgets import (
-        QAction, QApplication, QCheckBox, QComboBox, QFileDialog, QGraphicsItem,
-        QGraphicsPathItem, QGraphicsScene, QGraphicsTextItem, QGraphicsView,
+        QAction, QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QGraphicsEllipseItem,
+        QGraphicsItem, QGraphicsPathItem, QGraphicsScene, QGraphicsTextItem, QGraphicsView,
         QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
         QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
         QProgressBar, QPushButton, QShortcut, QSizePolicy, QSplitter, QStatusBar,
-        QTabWidget, QTextEdit, QToolBar, QVBoxLayout, QWidget
+        QTabWidget, QTextEdit, QToolBar, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
     )
     PYQT_VERSION_STR = QtCore.__version__
 

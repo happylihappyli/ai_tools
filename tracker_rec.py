@@ -83,6 +83,11 @@ def _save(data: Dict) -> None:
     tmp.replace(DATA_FILE)
 
 
+def get_current_node_id() -> Optional[str]:
+    """返回当前活跃节点的 ID。"""
+    return _load().get("current_node")
+
+
 def list_nodes() -> List[Dict]:
     """返回所有节点。"""
     return list(_load().get("nodes", []))
@@ -96,6 +101,15 @@ def get_node(node_id: str) -> Optional[Dict]:
     return None
 
 
+def find_parent_id(node_id: str) -> Optional[str]:
+    """查找引用了该节点作为 next 的父节点 ID。"""
+    data = _load()
+    for n in data.get("nodes", []):
+        if node_id in n.get("next", []):
+            return n["id"]
+    return None
+
+
 def set_goal(goal: str) -> bool:
     """设主目标。"""
     data = _load()
@@ -106,12 +120,14 @@ def set_goal(goal: str) -> bool:
 
 def add_node(node_id: str, title: str, desc: str = "",
              status: str = "pending", x: float = 0, y: float = 0,
-             next_nodes: Optional[List[str]] = None) -> bool:
-    """加节点 (id 重复自动跳过, 不报错)."""
+             next_nodes: Optional[List[str]] = None,
+             parent_id: Optional[str] = None) -> bool:
+    """加节点 (id 重复自动跳过, 不报错)。支持指定父节点。"""
     data = _load()
     if any(n["id"] == node_id for n in data["nodes"]):
         return False  # 已存在, 跳过
-    data["nodes"].append({
+    
+    new_node = {
         "id": str(node_id),
         "title": title,
         "description": desc,
@@ -119,7 +135,17 @@ def add_node(node_id: str, title: str, desc: str = "",
         "x": x,
         "y": y,
         "next": list(next_nodes) if next_nodes else [],
-    })
+    }
+    data["nodes"].append(new_node)
+    
+    # 如果指定了父节点，自动建立关联
+    if parent_id:
+        for n in data["nodes"]:
+            if n["id"] == str(parent_id):
+                if node_id not in n.get("next", []):
+                    n.setdefault("next", []).append(node_id)
+                break
+                
     _save(data)
     return True
 
