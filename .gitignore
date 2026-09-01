@@ -14,3 +14,9 @@ step_data.json
 
 # bak 工具产生的备份 (按 .YYYYMMDD_HHMMSS.bak 后缀)
 *.YYYYMMDD_HHMMSS.bak
+
+# ab (AI Build) C++ 项目构建产物
+/ab/build/
+/ab/src/AbJson.h.gch
+/CMakeCache.txt
+
