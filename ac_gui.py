@@ -228,9 +228,7 @@ class LogDockWidget(QWidget):
         font = QFont("monospace")
         font.setPointSize(10)
         self._edit.setFont(font)
-        self._edit.setStyleSheet(
-            "QPlainTextEdit { background: #1e1e1e; color: #e0e0e0; border: 1px solid #444; }"
-        )
+        # 不强制样式, 走主题 QSS (log 区域在主题里有专门配色)
         layout.addWidget(self._edit, 1)
 
     def _on_auto_scroll_toggle(self, checked: bool):
@@ -267,10 +265,7 @@ class AcMainWindow(QMainWindow):
         # 顶部: 项目信息
         info_frame = QFrame()
         info_frame.setFrameShape(QFrame.StyledPanel)
-        info_frame.setStyleSheet(
-            f"QFrame {{ background: {COLOR_BG}; border: 1px solid #e0e0e0; "
-            f"border-radius: 6px; padding: 8px; }}"
-        )
+        # 走主题 QSS, 不强制样式
         info_layout = QVBoxLayout(info_frame)
         self._proj_label = QLabel(f"📁 {PROJECT_DIR}")
         big = QFont()
@@ -282,7 +277,7 @@ class AcMainWindow(QMainWindow):
         self._auto_label = QLabel(
             f"auto 链: {', '.join(self._config.get('auto', ['build+deploy']))}"
         )
-        self._auto_label.setStyleSheet(f"color: {COLOR_LABEL}; font-size: 11px;")
+        # 走主题 QSS, 不强制
         info_layout.addWidget(self._auto_label)
         layout.addWidget(info_frame)
 
@@ -310,7 +305,7 @@ class AcMainWindow(QMainWindow):
         # 进度条 + 当前任务
         prog_row = QHBoxLayout()
         self._prog_label = QLabel("当前: —")
-        self._prog_label.setStyleSheet(f"color: {COLOR_LABEL};")
+        # 走主题 QSS
         self._prog_bar = QProgressBar()
         self._prog_bar.setRange(0, 0)  # 不确定模式 (跑的时候转)
         self._prog_bar.setVisible(False)
@@ -334,10 +329,10 @@ class AcMainWindow(QMainWindow):
         self._statusbar = QStatusBar()
         self.setStatusBar(self._statusbar)
         self._sb_label = QLabel("就绪")
-        self._sb_label.setStyleSheet(f"color: {COLOR_LABEL}; padding: 2px 8px;")
+        # 走主题 QSS (淡黄背景 + 深棕字)
         self._statusbar.addWidget(self._sb_label, 1)
         self._sb_right = QLabel(f"Qt={QT_BACKEND}")
-        self._sb_right.setStyleSheet(f"color: {COLOR_LABEL}; padding: 2px 8px;")
+        # 走主题 QSS
         self._statusbar.addPermanentWidget(self._sb_right)
 
         # ===== Action / Menu / Toolbar / Dock =====

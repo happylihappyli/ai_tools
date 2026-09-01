@@ -46,6 +46,12 @@ THEMES = {
         "err":          "#c62828",
         "warn":         "#ef6c00",
         "info":         "#1565c0",
+        # 提示信息背景色 (用户偏好: 淡黄保护眼睛, 前景清晰)
+        "msg_bg":       "#fff8e1",     # 淡黄 (amber 50, 提示色)
+        "msg_fg":       "#5d4037",     # 深棕字 (amber 900, 跟淡黄对比)
+        "msg_ok_bg":    "#e8f5e9",     # 淡绿
+        "msg_warn_bg":  "#fff3e0",     # 淡橙
+        "msg_err_bg":   "#ffebee",     # 淡红
         "log_bg":       "#fafafa",     # 日志面板背景
         "log_fg":       "#212121",
         "selection":    "#bbdefb",
@@ -65,6 +71,12 @@ THEMES = {
         "err":          "#f48771",
         "warn":         "#dcdcaa",
         "info":         "#569cd6",
+        # 提示信息背景色 (暗色主题: 暗黄褐, 前景浅米黄)
+        "msg_bg":       "#3a3520",     # 暗黄褐
+        "msg_fg":       "#ffe082",     # 浅米黄字
+        "msg_ok_bg":    "#1e3a1e",     # 暗绿
+        "msg_warn_bg":  "#3a2e1e",     # 暗橙
+        "msg_err_bg":   "#3a1e1e",     # 暗红
         "log_bg":       "#1e1e1e",     # 日志面板 — 跟主背景一致
         "log_fg":       "#d4d4d4",
         "selection":    "#264f78",     # VS Code 选区色
@@ -225,15 +237,35 @@ QToolButton:pressed {{
     background: {c['accent_hover']};
 }}
 
-/* ===== 状态栏 ===== */
+/* ===== 状态栏 (淡黄提示, 保护眼睛) ===== */
 QStatusBar {{
-    background: {c['bg_alt']};
-    color: {c['fg_label']};
+    background: {c['msg_bg']};
+    color: {c['msg_fg']};
     border-top: 1px solid {c['border']};
+    font-weight: bold;
 }}
 QStatusBar QLabel {{
-    color: {c['fg_label']};
-    padding: 2px 8px;
+    color: {c['msg_fg']};
+    background: {c['msg_bg']};
+    padding: 4px 10px;
+    font-weight: bold;
+}}
+/* 状态栏分级背景 (ok/err/warn/info) */
+QStatusBar QLabel[level="ok"] {{
+    background: {c['msg_ok_bg']};
+    color: {c['ok']};
+}}
+QStatusBar QLabel[level="err"] {{
+    background: {c['msg_err_bg']};
+    color: {c['err']};
+}}
+QStatusBar QLabel[level="warn"] {{
+    background: {c['msg_warn_bg']};
+    color: {c['warn']};
+}}
+QStatusBar QLabel[level="info"] {{
+    background: {c['msg_bg']};
+    color: {c['info']};
 }}
 
 /* ===== 按钮 ===== */
@@ -393,22 +425,28 @@ QCheckBox::indicator:checked {{
     border-color: {c['accent']};
 }}
 
-/* ===== 提示框 ===== */
+/* ===== 提示框 (淡黄) ===== */
 QToolTip {{
-    background: {c['bg_frame']};
-    color: {c['fg']};
+    background: {c['msg_bg']};
+    color: {c['msg_fg']};
     border: 1px solid {c['accent']};
-    padding: 4px 6px;
+    padding: 4px 8px;
     border-radius: 3px;
+    font-weight: bold;
 }}
 
-/* ===== 消息对话框 ===== */
+/* ===== 消息对话框 (淡黄卡片) ===== */
 QMessageBox {{
-    background: {c['bg']};
-    color: {c['fg']};
+    background: {c['msg_bg']};
+    color: {c['msg_fg']};
 }}
 QMessageBox QLabel {{
-    color: {c['fg']};
+    color: {c['msg_fg']};
+    background: transparent;
+    font-weight: bold;
+}}
+QMessageBox QPushButton {{
+    min-width: 80px;
 }}
 """
 

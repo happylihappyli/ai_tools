@@ -94,7 +94,11 @@ APP_ORG = "ai_tools"
 
 
 class TokenStatusBar(QStatusBar):
-    """扩展状态栏: 带颜色和图标, 检测到错误时停止自动滚动"""
+    """扩展状态栏: 带颜色和图标, 检测到错误时停止自动滚动
+
+    颜色: 优先用主题 msg_bg (淡黄) + msg_fg (深棕),
+          级别染色走 msg_ok_bg / msg_warn_bg / msg_err_bg.
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -102,37 +106,39 @@ class TokenStatusBar(QStatusBar):
         self._last_was_error = False
         # 用 label 显示消息 (可以控制颜色)
         self._label = QLabel("就绪")
-        self._label.setStyleSheet(f"color: {COLOR_LABEL}; padding: 2px 8px;")
+        # 走主题 QSS, 不强制样式
         self.addWidget(self._label, 1)
         # 右侧 token 状态简标
         self._right = QLabel("")
-        self._right.setStyleSheet(f"color: {COLOR_LABEL}; padding: 2px 8px;")
+        # 走主题 QSS
         self.addPermanentWidget(self._right)
 
     def set_auto_scroll(self, enabled: bool):
         self._auto_scroll = enabled
 
     def show_msg(self, msg: str, level: str = "info"):
-        """level: ok / err / warn / info"""
-        colors = {
-            "ok": COLOR_OK,
-            "err": COLOR_ERR,
-            "warn": COLOR_WARN,
-            "info": COLOR_INFO,
-        }
+        """level: ok / err / warn / info — 主题色 (ok/err/warn/info) 加粗显示"""
         prefix = {"ok": "✓", "err": "✗", "warn": "⚠", "info": "•"}.get(level, "•")
         self._label.setText(f"{prefix} {msg}")
-        self._label.setStyleSheet(
-            f"color: {colors.get(level, COLOR_LABEL)}; "
-            f"padding: 2px 8px; font-weight: {'bold' if level in ('err', 'ok') else 'normal'};"
-        )
+        # 走主题 QSS: 用 dynamic property 标记 level, QSS 里按 level 染色
+        # (QSS 选择器 QStatusBar QLabel[level="ok"] 已在 ac_themes 里)
+        self._label.setProperty("level", level)
+        # unpolish/polish 让 QSS 重读 property
+        self._label.style().unpolish(self._label)
+        self._label.style().polish(self._label)
         if level == "err":
             self._last_was_error = True
             self.set_auto_scroll(False)  # 错误停自动滚动 (用户偏好)
 
-    def set_right(self, text: str, color: str = COLOR_LABEL):
+    def set_right(self, text: str, color: str = None):
+        """右侧简标, color 不传走主题"""
         self._right.setText(text)
-        self._right.setStyleSheet(f"color: {color}; padding: 2px 8px;")
+        if color:
+            # 旧 API 兼容: 用 inline style
+            self._right.setStyleSheet(f"color: {color}; padding: 2px 8px;")
+        else:
+            # 走主题
+            self._right.setStyleSheet("")
 
 
 class RepoListWidget(QTreeWidget):
