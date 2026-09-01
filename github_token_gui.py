@@ -68,6 +68,13 @@ except Exception as e:
     print("  需要: pip install PySide6 (或 PyQt5/PySide2)", file=sys.stderr)
     sys.exit(1)
 
+# 主题 (从 ac_themes 读)
+try:
+    import ac_themes
+    HAS_THEMES = True
+except Exception:
+    HAS_THEMES = False
+
 if not gui_available():
     print(f"✗ 没找到可用的 Qt 后端 (PySide6/PyQt5/PySide2 全缺)", file=sys.stderr)
     sys.exit(1)
@@ -608,6 +615,24 @@ class TokenDialog(QMainWindow):
         m_help.addAction(self.act_about)
         m_help.addAction(self.act_about_qt)
 
+        # 主题 (如果有 ac_themes 模块)
+        if HAS_THEMES:
+            m_theme = mb.addMenu("主题(&Y)")
+            self._theme_actions: dict = {}
+            for tname, tinfo in ac_themes.THEMES.items():
+                act = QAction(tinfo["name"], self)
+                act.setCheckable(True)
+                act.setData(tname)
+                act.triggered.connect(
+                    lambda checked, n=tname: self.on_change_theme(n)
+                )
+                self._theme_actions[tname] = act
+                m_theme.addAction(act)
+            # 同步当前主题打勾
+            cur = ac_themes.get_current_theme()
+            for tn, ta in self._theme_actions.items():
+                ta.setChecked(tn == cur)
+
     def _build_toolbar(self):
         """构建可拖动工具栏"""
         tb = QToolBar("主工具栏", self)
@@ -893,6 +918,22 @@ class TokenDialog(QMainWindow):
             self._statusbar.show_msg(f"打开失败: {e}", "err")
             self._log("err", f"打开凭证文件失败: {e}")
 
+    def on_change_theme(self, theme_name: str):
+        """切主题, 立即应用 + 写配置"""
+        if not HAS_THEMES:
+            self._log("warn", "ac_themes 模块未加载, 切主题不可用")
+            return
+        if theme_name not in ac_themes.THEMES:
+            return
+        app = QApplication.instance()
+        if app is None:
+            return
+        ac_themes.apply_theme(app, theme_name)
+        # 同步打勾 (单选)
+        for tn, act in self._theme_actions.items():
+            act.setChecked(tn == theme_name)
+        self._log("ok", f"主题切换: {ac_themes.THEMES[theme_name]['name']} (已保存)")
+
     def on_run_cli_diagnose(self):
         """调起 github-token CLI 跑诊断, 把输出打到日志"""
         tool = GT_DIR / "github_token"
@@ -939,11 +980,17 @@ def main() -> int:
             # GUI 不跑, 走 CLI 模式
             return subprocess.call([str(GT_DIR / "github_token")] + sys.argv[2:])
     # Qt 应用
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")  # 沙箱默认 offscreen
+    if "QT_QPA_PLATFORM" not in os.environ and not os.environ.get("DISPLAY") \
+            and not os.environ.get("WAYLAND_DISPLAY"):
+        os.environ["QT_QPA_PLATFORM"] = "offscreen"  # 沙箱默认 offscreen
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
     app.setOrganizationName(APP_ORG)
+    # 应用主题 (从配置读, 默认 dark)
+    if HAS_THEMES:
+        cur = ac_themes.apply_theme(app, None)
+        sys.stderr.write(f"[主题] {ac_themes.THEMES[cur]['name']}\n")
     w = TokenDialog(auto_check=auto_check)
     w.show()
     return getattr(app, APP_EXEC)()

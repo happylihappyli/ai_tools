@@ -82,6 +82,7 @@ from _qt_compat import (
     QFileDialog, QInputDialog,
 )
 
+import ac_themes  # noqa: E402
 import github_token_gui as gt  # 复用 SetupHelpDialog / AboutDialog
 
 
@@ -354,6 +355,8 @@ class AcMainWindow(QMainWindow):
         self._log("info", f"项目: {PROJECT_DIR}")
         self._log("info", f"任务数: {len(self._tasks)}")
         self._log("info", f"Qt 后端: {QT_BACKEND}")
+        # 同步主题菜单打勾
+        self._sync_theme_actions(ac_themes.get_current_theme())
 
         # 自动启动
         if AUTO_START:
@@ -392,6 +395,15 @@ class AcMainWindow(QMainWindow):
         self.act_toggle_log.setShortcut(QKeySequence("Ctrl+L"))
         self.act_toggle_log.toggled.connect(self.on_toggle_log)
 
+        # 主题切换 (动态生成, 根据 ac_themes.THEMES 决定)
+        self._theme_actions: dict = {}  # name -> QAction
+        for tname, tinfo in ac_themes.THEMES.items():
+            act = QAction(tinfo["name"], self)
+            act.setCheckable(True)
+            act.setData(tname)
+            act.triggered.connect(lambda checked, n=tname: self.on_change_theme(n))
+            self._theme_actions[tname] = act
+
         self.act_help_setup = QAction("设置指南 (GitHub Token)...", self)
         self.act_help_setup.setShortcut(QKeySequence("F1"))
         self.act_help_setup.triggered.connect(self.on_help_setup)
@@ -425,6 +437,10 @@ class AcMainWindow(QMainWindow):
         m_view = mb.addMenu("视图(&V)")
         m_view.addAction(self.act_toggle_log)
 
+        m_theme = mb.addMenu("主题(&Y)")
+        for tname in ac_themes.THEMES.keys():
+            m_theme.addAction(self._theme_actions[tname])
+
         m_help = mb.addMenu("帮助(&H)")
         m_help.addAction(self.act_help_setup)
         m_help.addSeparator()
@@ -446,6 +462,27 @@ class AcMainWindow(QMainWindow):
         tb.addAction(self.act_toggle_log)
         tb.addAction(self.act_help_setup)
         self.addToolBar(tb)
+
+    def _sync_theme_actions(self, current: str):
+        """同步主题菜单打勾状态 (单选)"""
+        for tname, act in self._theme_actions.items():
+            act.setChecked(tname == current)
+
+    def on_change_theme(self, theme_name: str):
+        """切主题, 立即应用, 写到配置"""
+        if theme_name not in ac_themes.THEMES:
+            return
+        app = QApplication.instance()
+        if app is None:
+            return
+        ac_themes.apply_theme(app, theme_name)
+        self._sync_theme_actions(theme_name)
+        self._log("ok", f"主题已切换: {ac_themes.THEMES[theme_name]['name']} (已保存)")
+        # 状态栏右侧更新
+        if hasattr(self, "_sb_right"):
+            self._sb_right.setText(
+                f"Qt={QT_BACKEND} | 主题={ac_themes.THEMES[theme_name]['name']}"
+            )
 
     def _build_log_dock(self):
         self._log_widget = LogDockWidget()
@@ -636,6 +673,9 @@ def main() -> int:
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
     app.setOrganizationName(APP_ORG)
+    # 应用主题 (从配置读上次选择, 默认 dark)
+    current_theme = ac_themes.apply_theme(app, None)
+    sys.stderr.write(f"[主题] {ac_themes.THEMES[current_theme]['name']}\n")
     w = AcMainWindow()
     w.show()
     return getattr(app, APP_EXEC)()
