@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-ac_gui — AI 编译 Qt GUI 启动器 (集成 ac 工具链)
+ac_gui.py — DEPRECATED (2026-09-01)
 ================================================================
-启动后弹窗口,带菜单/工具栏/进度条/日志面板/状态栏。
-默认启动后立即自动跑 auto 链 (0 点击, 按用户偏好)。
+此 Python 版 ac-gui 已废弃, 请改用 ab (C++ Qt5/6 实现)。
 
-启动:
-    ac_gui                            # 弹窗 + 自动跑 auto 链
-    ac_gui --no-auto                  # 弹窗, 不自动跑
-    ac_gui --task build-only          # 弹窗 + 跑指定 task
-    ac_gui --project /path/to/proj    # 切到别的项目
+迁移:
+    $ ac-gui           # 旧调用, 自动转发到 ab (C++)
+    $ ab               # 新调用, 直接启动
+    $ ac ab            # 也能用
+    $ ac-gui [args]    # 任何旧参数都透传给 ab
 
-集成:
-    - 工具 → GitHub Token 管理  → 调 ac ght (独立子窗口)
-    - 工具 → TTS 播报          → 调 ac tts
-    - 工具 → 备份当前项目      → 调 ac bak
+源码保留仅供:
+    1. 参考 Python 实现细节
+    2. git log 留底
+
+如果需要这个 Python 版的行为, 显式调用:
+    $ python3 /home/bv/code/ai_tools/ac_gui.py
+================================================================
+以下是原始 ac_gui.py 源码, 已不再维护, 但仍可独立运行。
 """
 import os
 import sys

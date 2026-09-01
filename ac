@@ -4,7 +4,9 @@
 ac — AI 编译工具启动器 (AI Compile)
 ================================================================
 用法:
-    ac                          # 启动 GUI (自动加载 ai_build.json)
+    ac                          # 启动 ab GUI (C++, 替换 ac-gui)
+    ac ab [args]                # 直接调 ab
+    ac ab-gui [args]            # 同 ab, 旧名兼容
     ac --cwd /path/to/proj      # 指定工作目录
     ac --cmd "scons ..."        # 指定编译命令
     ac --test "./run.sh"        # 指定测试命令
@@ -19,9 +21,15 @@ ac — AI 编译工具启动器 (AI Compile)
     ac ght-cli                  # GitHub Token CLI 诊断
     ac ght-url                  # 打印 GitHub 生成 token 的 URL
     ac ght-setup                # 打印 step-by-step 生成指引
+    ac ab                       # 启动 ab GUI (C++ Qt5/6, 替代 ac-gui Python 版)
     ac tts help                 # tts 帮助
     ac bak help                 # bak 帮助
     ac ght --help               # ght 帮助
+    ac ab --help                # ab 帮助
+
+废弃:
+    ac-gui (Python 版本)         # 已废弃, 软链到 ab, 行为一致
+    cpp_panel/ai_panel          # 老的 scons C++ 面板, 留作 fallback
 
 编译事件自动 tts 播报:
     编译完成 (rc=0) → tts "编译成功"
@@ -42,9 +50,10 @@ TTS_TOOL = GT_DIR / "tts"
 BAK_TOOL = GT_DIR / "bak"
 GHT_TOOL = GT_DIR / "github_token"
 GHT_GUI = GT_DIR / "github_token_gui"
+AB_LAUNCHER = GT_DIR / "ab_launcher"   # 2026-09-01: 新 C++ ab GUI (替代 ac-gui)
 
 # ac 自己的子命令 (会拦截并转发, 不走 compile 后端)
-SUBCOMMANDS = {"tts", "bak", "ght", "ght-cli", "ght-url", "ght-setup"}
+SUBCOMMANDS = {"tts", "bak", "ght", "ght-cli", "ght-url", "ght-setup", "ab", "ab-gui"}
 
 
 def tts_async(event: str, n: int = 0) -> None:
@@ -96,6 +105,12 @@ def dispatch_subcommand(args: list) -> int:
         tool = TTS_TOOL
     elif sub == "bak":
         tool = BAK_TOOL
+    elif sub in ("ab", "ab-gui"):
+        # 2026-09-01: ab 是 C++ GUI 替代 ac-gui Python 版
+        if not AB_LAUNCHER.exists():
+            sys.stderr.write(f"✗ 找不到 ab 启动器: {AB_LAUNCHER}\n")
+            return 1
+        return subprocess.call([str(AB_LAUNCHER)] + args[1:])
     else:
         return 1
     if not tool.exists():
