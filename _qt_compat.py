@@ -78,6 +78,8 @@ QApplication = None
 QCheckBox = None
 QColor = None
 QComboBox = None
+QDockWidget = None
+QDialog = None
 QFileDialog = None
 QFrame = None
 QFont = None
@@ -138,7 +140,7 @@ if QT_BACKEND == "pyside6":
         QPalette, QPen, QTextCursor
     )
     from PySide6.QtWidgets import (
-        QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QGraphicsEllipseItem,
+        QApplication, QCheckBox, QComboBox, QDialog, QDockWidget, QFileDialog, QFrame, QGraphicsEllipseItem,
         QGraphicsItem, QGraphicsPathItem, QGraphicsScene, QGraphicsTextItem, QGraphicsView,
         QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
         QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
@@ -159,7 +161,7 @@ elif QT_BACKEND == "pyqt5":
     )
     # PyQt5 的 QAction 在 QtWidgets 里 (Qt6 移到 QtGui)
     from PyQt5.QtWidgets import (
-        QAction, QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QGraphicsEllipseItem,
+        QAction, QApplication, QCheckBox, QComboBox, QDialog, QDockWidget, QFileDialog, QFrame, QGraphicsEllipseItem,
         QGraphicsItem, QGraphicsPathItem, QGraphicsScene, QGraphicsTextItem, QGraphicsView,
         QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
         QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
@@ -171,15 +173,13 @@ elif QT_BACKEND == "pyqt5":
 elif QT_BACKEND == "pyside2":
     from PySide2 import QtCore, QtWidgets, QtGui
     from PySide2.QtCore import (
-        Qt, QTimer, QObject, Signal, Slot, QProcess, QProcessEnvironment,
-        QPointF, QRectF, QFileSystemWatcher
+        Qt, QTimer, QObject, Signal, Slot, QProcess, QProcessEnvironment, QPointF, QRectF, QFileSystemWatcher
     )
     from PySide2.QtGui import (
-        QBrush, QColor, QFont, QKeySequence, QPainter, QPainterPath, QPalette,
-        QPen, QTextCursor
+        QBrush, QColor, QFont, QKeySequence, QPainter, QPainterPath, QPalette, QPen, QTextCursor
     )
     from PySide2.QtWidgets import (
-        QAction, QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QGraphicsEllipseItem,
+        QAction, QApplication, QCheckBox, QComboBox, QDockWidget, QFileDialog, QFrame, QGraphicsEllipseItem,
         QGraphicsItem, QGraphicsPathItem, QGraphicsScene, QGraphicsTextItem, QGraphicsView,
         QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
         QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
