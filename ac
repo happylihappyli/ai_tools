@@ -36,9 +36,14 @@ def load_local_config():
 
 def main() -> int:
     local_config = load_local_config()
-    
+
     args = sys.argv[1:]
-    
+
+    # 处理 help 参数: 打印帮助并退出 (不启动 GUI, 跟 .trae/rules/ac_only.md 一致)
+    if "--help" in args or "-h" in args or "help" in args:
+        print(__doc__)
+        return 0
+
     # 如果命令行没给 --cwd 或 -d，且配置里有，则补上
     if "--cwd" not in args and "-d" not in args and "cwd" in local_config:
         args.extend(["--cwd", local_config["cwd"]])
