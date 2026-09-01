@@ -1,3 +1,10 @@
 /build_logs
 /__pycache__
 /.vscode
+
+# scons C++ 编译产物
+*.o
+*.dblite
+/cpp_panel/ai_panel
+/cpp_panel/ai_panel.exe
+*.exe

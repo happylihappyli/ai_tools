@@ -89,6 +89,105 @@
       "x": 0,
       "y": 0,
       "next": []
+    },
+    {
+      "id": "task_1787915238",
+      "title": "diag",
+      "description": "CLI Command: cd /home/bv/code/BV_WorkSpace/workspace_v7_lib && scons -j8",
+      "status": "in_progress",
+      "x": 0,
+      "y": 0,
+      "next": []
+    },
+    {
+      "id": "task_1787915251",
+      "title": "diag",
+      "description": "CLI Command: cd /home/bv/code/BV_WorkSpace/workspace_v7_lib && python3 scripts/run_cloud_main_gui.py --auto",
+      "status": "in_progress",
+      "x": 0,
+      "y": 0,
+      "next": []
+    },
+    {
+      "id": "task_1787915367",
+      "title": "view-log",
+      "description": "CLI Command: tail -200 /home/bv/code/godot_ui_linux/.ai_tools/cloud_main.log | grep -E 'look_at|sample center|grab_viewport_frame head|reparent|ERROR' | tail -40",
+      "status": "in_progress",
+      "x": 0,
+      "y": 0,
+      "next": []
+    },
+    {
+      "id": "task_1787915650",
+      "title": "build+deploy",
+      "description": "CLI Command: cd /home/bv/code/BV_WorkSpace/workspace_v7_lib && scons -j8 && cp /home/bv/code/BV_WorkSpace/bin/libworkspace_v7.so /home/bv/code/godot_ui_linux/godot-ui-standalone-skia/bin/Debug/ && echo [DEPLOY-OK] libworkspace_v7.so synced",
+      "status": "in_progress",
+      "x": 0,
+      "y": 0,
+      "next": []
+    },
+    {
+      "id": "task_1787915653",
+      "title": "diag",
+      "description": "CLI Command: cd /home/bv/code/BV_WorkSpace/workspace_v7_lib && python3 scripts/run_cloud_main_gui.py --auto",
+      "status": "in_progress",
+      "x": 0,
+      "y": 0,
+      "next": []
+    },
+    {
+      "id": "task_1787921912",
+      "title": "diag",
+      "description": "CLI Command: cd /home/bv/code/BV_WorkSpace/workspace_v7_lib && python3 scripts/run_cloud_main_gui.py --auto",
+      "status": "in_progress",
+      "x": 0,
+      "y": 0,
+      "next": []
+    },
+    {
+      "id": "task_1787921927",
+      "title": "view-log",
+      "description": "CLI Command: tail -200 /home/bv/code/godot_ui_linux/.ai_tools/cloud_main.log | grep -E 'look_at|sample center|grab_viewport_frame head|reparent|ERROR' | tail -40",
+      "status": "in_progress",
+      "x": 0,
+      "y": 0,
+      "next": []
+    },
+    {
+      "id": "task_1788241018",
+      "title": "build+deploy",
+      "description": "CLI Command: cd /home/bv/code/BV_WorkSpace/workspace_v7_lib && scons -j8 && cp /home/bv/code/BV_WorkSpace/bin/libworkspace_v7.so /home/bv/code/godot_ui_linux/godot-ui-standalone-skia/bin/Debug/ && echo [DEPLOY-OK] libworkspace_v7.so synced",
+      "status": "in_progress",
+      "x": 0,
+      "y": 0,
+      "next": []
+    },
+    {
+      "id": "task_1788241019",
+      "title": "diag",
+      "description": "CLI Command: cd /home/bv/code/BV_WorkSpace/workspace_v7_lib && python3 scripts/run_cloud_main_gui.py --auto",
+      "status": "in_progress",
+      "x": 0,
+      "y": 0,
+      "next": []
+    },
+    {
+      "id": "task_1788241094",
+      "title": "build+deploy",
+      "description": "CLI Command: cd /home/bv/code/BV_WorkSpace/workspace_v7_lib && scons -j8 && cp /home/bv/code/BV_WorkSpace/bin/libworkspace_v7.so /home/bv/code/godot_ui_linux/godot-ui-standalone-skia/bin/Debug/ && echo [DEPLOY-OK] libworkspace_v7.so synced",
+      "status": "in_progress",
+      "x": 0,
+      "y": 0,
+      "next": []
+    },
+    {
+      "id": "task_1788241095",
+      "title": "diag",
+      "description": "CLI Command: cd /home/bv/code/BV_WorkSpace/workspace_v7_lib && python3 scripts/run_cloud_main_gui.py --auto",
+      "status": "in_progress",
+      "x": 0,
+      "y": 0,
+      "next": []
     }
   ],
   "events": [
@@ -254,212 +353,356 @@
     },
     {
       "id": 21,
-      "ts": "2026-08-28T15:47:51",
+      "ts": "2026-08-28T16:04:03",
       "type": "compile_start",
       "title": "编译开始",
-      "desc": "Command: echo [AC-CMD] hello from ac, cwd=$(pwd) (CWD: /home/bv/code/godot_ui_linux)",
+      "desc": "Command: scons platform=linuxbsd bvws_v7=1 -j8 (CWD: /home/bv/code/godot_ui_linux/godot-ui-standalone-skia)",
       "node_id": null
     },
     {
       "id": 22,
-      "ts": "2026-08-28T15:47:51",
+      "ts": "2026-08-28T16:04:03",
       "type": "compile_finish",
       "title": "编译成功",
-      "desc": "耗时: 12ms, 错误: 0, 警告: 0",
+      "desc": "耗时: 288ms, 错误: 0, 警告: 1",
       "node_id": null
     },
     {
       "id": 23,
-      "ts": "2026-08-28T15:51:10",
+      "ts": "2026-08-28T16:04:16",
       "type": "compile_start",
       "title": "编译开始",
-      "desc": "Command: echo [AC-TEST] compiling workspace_v7_lib && cd /home/bv/code/BV_WorkSpace/workspace_v7_lib && scons -j8 2>&1 | tail -20 (CWD: /home/bv/code/godot_ui_linux)",
+      "desc": "Command: scons platform=linuxbsd bvws_v7=1 -j8 (CWD: /home/bv/code/godot_ui_linux/godot-ui-standalone-skia)",
       "node_id": null
     },
     {
       "id": 24,
-      "ts": "2026-08-28T15:51:10",
+      "ts": "2026-08-28T16:04:16",
       "type": "compile_finish",
       "title": "编译成功",
-      "desc": "耗时: 239ms, 错误: 0, 警告: 0",
+      "desc": "耗时: 250ms, 错误: 0, 警告: 1",
       "node_id": null
     },
     {
       "id": 25,
-      "ts": "2026-08-28T15:51:17",
+      "ts": "2026-08-28T16:04:22",
       "type": "compile_start",
       "title": "编译开始",
-      "desc": "Command: tail -50 /home/bv/code/godot_ui_linux/.ai_tools/cloud_main.log | grep -E 'look_at|sample center|grab_viewport_frame head' | tail -10 (CWD: /home/bv/code/godot_ui_linux)",
+      "desc": "Command: scons platform=linuxbsd bvws_v7=1 -j8 (CWD: /home/bv/code/godot_ui_linux/godot-ui-standalone-skia)",
       "node_id": null
     },
     {
       "id": 26,
-      "ts": "2026-08-28T15:51:17",
+      "ts": "2026-08-28T16:04:22",
       "type": "compile_finish",
       "title": "编译成功",
-      "desc": "耗时: 11ms, 错误: 0, 警告: 0",
+      "desc": "耗时: 267ms, 错误: 0, 警告: 1",
       "node_id": null
     },
     {
       "id": 27,
-      "ts": "2026-08-28T18:27:10",
+      "ts": "2026-08-28T16:04:52",
       "type": "compile_start",
       "title": "编译开始",
-      "desc": "Command: cp /home/bv/code/BV_WorkSpace/bin/libworkspace_v7.so /home/bv/code/godot_ui_linux/godot-ui-standalone-skia/bin/Debug/ && echo [DEPLOY-OK] (CWD: /home/bv/code/godot_ui_linux/godot-ui-standalone-skia)",
+      "desc": "Command: scons platform=linuxbsd bvws_v7=1 -j8 (CWD: /home/bv/code/godot_ui_linux/godot-ui-standalone-skia)",
       "node_id": null
     },
     {
       "id": 28,
-      "ts": "2026-08-28T18:27:10",
+      "ts": "2026-08-28T16:05:13",
       "type": "compile_finish",
       "title": "编译成功",
-      "desc": "耗时: 12ms, 错误: 0, 警告: 0",
+      "desc": "耗时: 21236ms, 错误: 0, 警告: 4",
       "node_id": null
     },
     {
       "id": 29,
-      "ts": "2026-08-28T18:30:04",
+      "ts": "2026-08-28T16:05:20",
       "type": "compile_start",
       "title": "编译开始",
-      "desc": "Command: cp /home/bv/code/BV_WorkSpace/bin/libworkspace_v7.so /home/bv/code/godot_ui_linux/godot-ui-standalone-skia/bin/Debug/ && echo [DEPLOY-OK] (CWD: /home/bv/code/godot_ui_linux/godot-ui-standalone-skia)",
+      "desc": "Command: ./run_cloud_local.sh (CWD: /home/bv/code/godot_ui_linux/godot-ui-standalone-skia)",
       "node_id": null
     },
     {
       "id": 30,
-      "ts": "2026-08-28T18:30:04",
-      "type": "compile_finish",
-      "title": "编译成功",
-      "desc": "耗时: 19ms, 错误: 0, 警告: 0",
+      "ts": "2026-08-28T18:18:08",
+      "type": "compile_start",
+      "title": "编译开始",
+      "desc": "Command: ./bin/Debug/cloud_main 1280x800 (CWD: /home/bv/code/godot_ui_linux)",
       "node_id": null
     },
     {
       "id": 31,
-      "ts": "2026-08-28T18:31:29",
-      "type": "compile_start",
-      "title": "编译开始",
-      "desc": "Command: cp /home/bv/code/BV_WorkSpace/bin/libworkspace_v7.so /home/bv/code/godot_ui_linux/godot-ui-standalone-skia/bin/Debug/ && echo [DEPLOY-OK] (CWD: /home/bv/code/godot_ui_linux/godot-ui-standalone-skia)",
+      "ts": "2026-08-28T18:18:08",
+      "type": "compile_fail",
+      "title": "编译失败 (code 127)",
+      "desc": "耗时: 17ms, 错误: 0, 警告: 0",
       "node_id": null
     },
     {
       "id": 32,
-      "ts": "2026-08-28T18:31:29",
+      "ts": "2026-08-28T18:58:53",
+      "type": "compile_start",
+      "title": "编译开始",
+      "desc": "Command: cd /home/bv/code/godot_ui_linux && python3 run_cloud_main_diag_gui.py --auto (CWD: /home/bv/code/godot_ui_linux)",
+      "node_id": null
+    },
+    {
+      "id": 33,
+      "ts": "2026-08-28T18:58:53",
+      "type": "compile_fail",
+      "title": "编译失败 (code 2)",
+      "desc": "耗时: 25ms, 错误: 0, 警告: 0",
+      "node_id": null
+    },
+    {
+      "id": 34,
+      "ts": "2026-08-28T19:07:18",
+      "type": "compile_start",
+      "title": "编译开始",
+      "desc": "Command: cd /home/bv/code/BV_WorkSpace/workspace_v7_lib && scons -j8 (CWD: /home/bv/code/godot_ui_linux)",
+      "node_id": null
+    },
+    {
+      "id": 35,
+      "ts": "2026-08-28T19:07:18",
+      "type": "compile_finish",
+      "title": "编译成功",
+      "desc": "耗时: 181ms, 错误: 0, 警告: 0",
+      "node_id": null
+    },
+    {
+      "id": 36,
+      "ts": "2026-08-28T19:07:31",
+      "type": "compile_start",
+      "title": "编译开始",
+      "desc": "Command: cd /home/bv/code/BV_WorkSpace/workspace_v7_lib && python3 scripts/run_cloud_main_gui.py --auto (CWD: /home/bv/code/godot_ui_linux)",
+      "node_id": null
+    },
+    {
+      "id": 37,
+      "ts": "2026-08-28T19:09:27",
+      "type": "compile_start",
+      "title": "编译开始",
+      "desc": "Command: tail -200 /home/bv/code/godot_ui_linux/.ai_tools/cloud_main.log | grep -E 'look_at|sample center|grab_viewport_frame head|reparent|ERROR' | tail -40 (CWD: /home/bv/code/godot_ui_linux)",
+      "node_id": null
+    },
+    {
+      "id": 38,
+      "ts": "2026-08-28T19:09:27",
+      "type": "compile_finish",
+      "title": "编译成功",
+      "desc": "耗时: 28ms, 错误: 0, 警告: 0",
+      "node_id": null
+    },
+    {
+      "id": 39,
+      "ts": "2026-08-28T19:14:10",
+      "type": "compile_start",
+      "title": "编译开始",
+      "desc": "Command: cd /home/bv/code/BV_WorkSpace/workspace_v7_lib && scons -j8 && cp /home/bv/code/BV_WorkSpace/bin/libworkspace_v7.so /home/bv/code/godot_ui_linux/godot-ui-standalone-skia/bin/Debug/ && echo [DEPLOY-OK] libworkspace_v7.so synced (CWD: /home/bv/code/godot_ui_linux)",
+      "node_id": null
+    },
+    {
+      "id": 40,
+      "ts": "2026-08-28T19:14:10",
+      "type": "compile_finish",
+      "title": "编译成功",
+      "desc": "耗时: 231ms, 错误: 0, 警告: 0",
+      "node_id": null
+    },
+    {
+      "id": 41,
+      "ts": "2026-08-28T19:14:13",
+      "type": "compile_start",
+      "title": "编译开始",
+      "desc": "Command: cd /home/bv/code/BV_WorkSpace/workspace_v7_lib && python3 scripts/run_cloud_main_gui.py --auto (CWD: /home/bv/code/godot_ui_linux)",
+      "node_id": null
+    },
+    {
+      "id": 42,
+      "ts": "2026-08-28T20:58:32",
+      "type": "compile_start",
+      "title": "编译开始",
+      "desc": "Command: cd /home/bv/code/BV_WorkSpace/workspace_v7_lib && python3 scripts/run_cloud_main_gui.py --auto (CWD: /home/bv/code/godot_ui_linux)",
+      "node_id": null
+    },
+    {
+      "id": 43,
+      "ts": "2026-08-28T20:58:47",
+      "type": "compile_start",
+      "title": "编译开始",
+      "desc": "Command: tail -200 /home/bv/code/godot_ui_linux/.ai_tools/cloud_main.log | grep -E 'look_at|sample center|grab_viewport_frame head|reparent|ERROR' | tail -40 (CWD: /home/bv/code/godot_ui_linux)",
+      "node_id": null
+    },
+    {
+      "id": 44,
+      "ts": "2026-08-28T20:58:47",
+      "type": "compile_finish",
+      "title": "编译成功",
+      "desc": "耗时: 17ms, 错误: 0, 警告: 0",
+      "node_id": null
+    },
+    {
+      "id": 45,
+      "ts": "2026-08-28T20:59:33",
+      "type": "compile_start",
+      "title": "编译开始",
+      "desc": "Command: python3 /home/bv/code/BV_WorkSpace/workspace_v7_lib/scripts/run_cloud_main_gui.py --auto (CWD: /home/bv/code/godot_ui_linux)",
+      "node_id": null
+    },
+    {
+      "id": 46,
+      "ts": "2026-08-29T11:50:19",
+      "type": "compile_start",
+      "title": "编译开始",
+      "desc": "Command: cd /home/bv/code/BV_WorkSpace/workspace_v7_lib && scons -j8 (CWD: /home/bv/code/godot_ui_linux)",
+      "node_id": null
+    },
+    {
+      "id": 47,
+      "ts": "2026-08-29T11:50:19",
+      "type": "compile_finish",
+      "title": "编译成功",
+      "desc": "耗时: 237ms, 错误: 0, 警告: 0",
+      "node_id": null
+    },
+    {
+      "id": 48,
+      "ts": "2026-08-29T14:14:31",
+      "type": "compile_start",
+      "title": "编译开始",
+      "desc": "Command: scons -j8 test=1 (CWD: /home/bv/code/BV_WorkSpace/workspace_v7_lib)",
+      "node_id": null
+    },
+    {
+      "id": 49,
+      "ts": "2026-08-29T14:14:31",
+      "type": "compile_finish",
+      "title": "编译成功",
+      "desc": "耗时: 252ms, 错误: 0, 警告: 0",
+      "node_id": null
+    },
+    {
+      "id": 50,
+      "ts": "2026-08-29T14:16:25",
+      "type": "compile_start",
+      "title": "编译开始",
+      "desc": "Command: scons -j8 test=1 (CWD: /home/bv/code/BV_WorkSpace/bin)",
+      "node_id": null
+    },
+    {
+      "id": 51,
+      "ts": "2026-08-29T14:16:25",
+      "type": "compile_fail",
+      "title": "编译失败 (code 2)",
+      "desc": "耗时: 94ms, 错误: 0, 警告: 0",
+      "node_id": null
+    },
+    {
+      "id": 52,
+      "ts": "2026-08-29T14:16:30",
+      "type": "compile_start",
+      "title": "编译开始",
+      "desc": "Command: scons -j8 test=1 (CWD: /home/bv/code/BV_WorkSpace/workspace_v7_lib)",
+      "node_id": null
+    },
+    {
+      "id": 53,
+      "ts": "2026-08-29T14:16:30",
+      "type": "compile_finish",
+      "title": "编译成功",
+      "desc": "耗时: 372ms, 错误: 0, 警告: 0",
+      "node_id": null
+    },
+    {
+      "id": 54,
+      "ts": "2026-08-30T11:36:53",
+      "type": "compile_start",
+      "title": "编译开始",
+      "desc": "Command: cd /home/bv/code/BV_WorkSpace/workspace_v7_lib && scons -j8 (CWD: /home/bv/code/godot_ui_linux)",
+      "node_id": null
+    },
+    {
+      "id": 55,
+      "ts": "2026-08-30T11:36:57",
+      "type": "compile_finish",
+      "title": "编译成功",
+      "desc": "耗时: 3813ms, 错误: 0, 警告: 10",
+      "node_id": null
+    },
+    {
+      "id": 56,
+      "ts": "2026-08-30T11:37:00",
+      "type": "compile_start",
+      "title": "编译开始",
+      "desc": "Command: cp /home/bv/code/BV_WorkSpace/bin/libworkspace_v7.so /home/bv/code/godot_ui_linux/godot-ui-standalone-skia/bin/Debug/ && echo [DEPLOY-OK] libworkspace_v7.so synced (CWD: /home/bv/code/godot_ui_linux)",
+      "node_id": null
+    },
+    {
+      "id": 57,
+      "ts": "2026-08-30T11:37:00",
       "type": "compile_finish",
       "title": "编译成功",
       "desc": "耗时: 10ms, 错误: 0, 警告: 0",
       "node_id": null
     },
     {
-      "id": 33,
-      "ts": "2026-08-30T08:53:27",
+      "id": 58,
+      "ts": "2026-08-30T11:37:21",
       "type": "compile_start",
       "title": "编译开始",
-      "desc": "Command: echo test (CWD: /home/bv/code/godot_ui_linux)",
+      "desc": "Command: cd /home/bv/code/BV_WorkSpace/workspace_v7_lib && python3 scripts/run_cloud_main_gui.py --auto (CWD: /home/bv/code/godot_ui_linux)",
       "node_id": null
     },
     {
-      "id": 34,
-      "ts": "2026-08-30T08:53:27",
-      "type": "compile_finish",
-      "title": "编译成功",
-      "desc": "耗时: 9ms, 错误: 0, 警告: 0",
-      "node_id": null
-    },
-    {
-      "id": 35,
-      "ts": "2026-08-31T14:04:18",
+      "id": 59,
+      "ts": "2026-09-01T13:36:58",
       "type": "compile_start",
       "title": "编译开始",
-      "desc": "Command: python3 /home/bv/code/godot_ui_linux/godot-ui-standalone-skia/run_rebuild_v6_scene_tree_gui.py --auto (CWD: /home/bv/code/godot_ui_linux)",
+      "desc": "Command: cd /home/bv/code/BV_WorkSpace/workspace_v7_lib && scons -j8 && cp /home/bv/code/BV_WorkSpace/bin/libworkspace_v7.so /home/bv/code/godot_ui_linux/godot-ui-standalone-skia/bin/Debug/ && echo [DEPLOY-OK] libworkspace_v7.so synced (CWD: /home/bv/code/godot_ui_linux)",
       "node_id": null
     },
     {
-      "id": 36,
-      "ts": "2026-08-31T14:04:53",
+      "id": 60,
+      "ts": "2026-09-01T13:36:59",
       "type": "compile_finish",
       "title": "编译成功",
-      "desc": "耗时: 35351ms, 错误: 10, 警告: 2",
+      "desc": "耗时: 1044ms, 错误: 0, 警告: 4",
       "node_id": null
     },
     {
-      "id": 37,
-      "ts": "2026-08-31T14:06:16",
+      "id": 61,
+      "ts": "2026-09-01T13:36:59",
       "type": "compile_start",
       "title": "编译开始",
-      "desc": "Command: python3 /home/bv/code/godot_ui_linux/godot-ui-standalone-skia/run_rebuild_v6_scene_tree_gui.py --auto (CWD: /home/bv/code/godot_ui_linux)",
+      "desc": "Command: cd /home/bv/code/BV_WorkSpace/workspace_v7_lib && python3 scripts/run_cloud_main_gui.py --auto (CWD: /home/bv/code/godot_ui_linux)",
       "node_id": null
     },
     {
-      "id": 38,
-      "ts": "2026-08-31T14:06:36",
-      "type": "compile_finish",
-      "title": "编译成功",
-      "desc": "耗时: 19742ms, 错误: 10, 警告: 2",
-      "node_id": null
-    },
-    {
-      "id": 39,
-      "ts": "2026-08-31T14:21:48",
+      "id": 62,
+      "ts": "2026-09-01T13:38:14",
       "type": "compile_start",
       "title": "编译开始",
-      "desc": "Command: python3 /home/bv/code/godot_ui_linux/godot-ui-standalone-skia/run_rebuild_v6_scene_tree_gui.py --auto (CWD: /home/bv/code/godot_ui_linux)",
+      "desc": "Command: cd /home/bv/code/BV_WorkSpace/workspace_v7_lib && scons -j8 && cp /home/bv/code/BV_WorkSpace/bin/libworkspace_v7.so /home/bv/code/godot_ui_linux/godot-ui-standalone-skia/bin/Debug/ && echo [DEPLOY-OK] libworkspace_v7.so synced (CWD: /home/bv/code/godot_ui_linux)",
       "node_id": null
     },
     {
-      "id": 40,
-      "ts": "2026-08-31T14:22:44",
+      "id": 63,
+      "ts": "2026-09-01T13:38:14",
       "type": "compile_finish",
       "title": "编译成功",
-      "desc": "耗时: 55180ms, 错误: 10, 警告: 2",
+      "desc": "耗时: 98ms, 错误: 0, 警告: 0",
       "node_id": null
     },
     {
-      "id": 41,
-      "ts": "2026-08-31T14:23:16",
+      "id": 64,
+      "ts": "2026-09-01T13:38:15",
       "type": "compile_start",
       "title": "编译开始",
-      "desc": "Command: python3 /home/bv/code/godot_ui_linux/godot-ui-standalone-skia/run_rebuild_v6_scene_tree_gui.py --auto (CWD: /home/bv/code/godot_ui_linux)",
-      "node_id": null
-    },
-    {
-      "id": 42,
-      "ts": "2026-08-31T14:23:44",
-      "type": "compile_finish",
-      "title": "编译成功",
-      "desc": "耗时: 27383ms, 错误: 10, 警告: 2",
-      "node_id": null
-    },
-    {
-      "id": 43,
-      "ts": "2026-08-31T14:27:24",
-      "type": "compile_start",
-      "title": "编译开始",
-      "desc": "Command: python3 /home/bv/code/godot_ui_linux/godot-ui-standalone-skia/diag_scene_tree_30s.py --auto --save (CWD: /home/bv/code/godot_ui_linux)",
-      "node_id": null
-    },
-    {
-      "id": 44,
-      "ts": "2026-08-31T14:27:58",
-      "type": "compile_finish",
-      "title": "编译成功",
-      "desc": "耗时: 33848ms, 错误: 8, 警告: 3",
-      "node_id": null
-    },
-    {
-      "id": 45,
-      "ts": "2026-08-31T21:22:44",
-      "type": "compile_start",
-      "title": "编译开始",
-      "desc": "Command: ./bin/gn gen out/Static 2>&1 | tail -10 (CWD: /home/bv/code/skia_build/skia)",
-      "node_id": null
-    },
-    {
-      "id": 46,
-      "ts": "2026-08-31T21:22:44",
-      "type": "compile_finish",
-      "title": "编译成功",
-      "desc": "耗时: 138ms, 错误: 10, 警告: 0",
+      "desc": "Command: cd /home/bv/code/BV_WorkSpace/workspace_v7_lib && python3 scripts/run_cloud_main_gui.py --auto (CWD: /home/bv/code/godot_ui_linux)",
       "node_id": null
     }
   ],
-  "current_node": "task_1787898802"
+  "current_node": "task_1788241095"
 }

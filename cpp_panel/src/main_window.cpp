@@ -262,7 +262,10 @@ void MainWindow::onProcessReadyReadStandardOutput() {
 void MainWindow::onProcessReadyReadStandardError() {
     QString err = QString::fromUtf8(compileProcess->readAllStandardError());
     for (const QString &line : err.split("\n", Qt::SkipEmptyParts)) {
-        if (line.contains("error", Qt::CaseInsensitive)) {
+        if (line.contains("Error opening file", Qt::CaseInsensitive)) {
+            // 将文件打开失败从 Error 改为 Warning (黄色)，并提示检查目录
+            logMessage(line + " (Hint: Check if file exists in project or bin directory)", QColor("#fbbf24"));
+        } else if (line.contains("error", Qt::CaseInsensitive)) {
             logMessage(line, QColor("#ff6b6b"));
         } else if (line.contains("warning", Qt::CaseInsensitive)) {
             logMessage(line, QColor("#fbbf24"));

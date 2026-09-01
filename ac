@@ -23,174 +23,85 @@ CPP_PANEL = GT_DIR / "cpp_panel" / "ai_panel"
 
 
 def load_local_config():
-    """从当前目录往上找 ai_build.json, 像 git 找 .git 一样.
-
-    找到第一个就停 (不会跨过 home 目录边界). 找不到返回 {}.
-    找到时把所在目录塞进 _resolved_dir 字段, 方便 task 知道用哪个目录.
-    """
-    cur = Path.cwd().resolve()
-    # 找 .trae 这种 workspace 标记也行, 但先简单: 一直往上到 /
-    while True:
-        config_path = cur / "ai_build.json"
-        if config_path.is_file():
-            try:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    cfg = json.load(f)
-                cfg["_resolved_dir"] = str(cur)
-                return cfg
-            except Exception as e:
-                sys.stderr.write(f"⚠ 读取 {config_path} 失败: {e}\n")
-                return {}
-        parent = cur.parent
-        if parent == cur:  # 到 / 了
-            return {}
-        cur = parent
+    """从当前目录读取 ai_build.json 配置"""
+    config_path = Path.cwd() / "ai_build.json"
+    if config_path.exists():
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            sys.stderr.write(f"⚠ 读取 ai_build.json 失败: {e}\n")
+    return {}
 
 
 def main() -> int:
     local_config = load_local_config()
-
+    
     args = sys.argv[1:]
-
-    # help / -h / --help — 不启动 GUI, 直接打印用法 (沙箱里 GUI 起不来)
-    if args and args[0] in ("help", "-h", "--help"):
-        print(__doc__)
-        print("通用用法:")
-        print("    ac                          # 启动 GUI (当前目录有 ai_build.json 时自动加载)")
-        print("    ac --cwd <dir> --cmd <c>    # GUI 预填参数")
-        print("    ac --test \"./run.sh\"        # GUI 预填测试命令")
-        print("    ac --offscreen              # 用 Python 版 (compile_tool.py), 不开 C++ GUI")
-        print("    ac help                     # 打印本帮助")
-        print()
-        print("ai_build.json 字段:")
-        print("    cwd: 默认工作目录")
-        print("    cmd: 默认编译命令")
-        print("    test: 测试命令")
-        print("    tasks: [{name, cmd, desc}] 任务列表 (链式任务)")
-        print("    auto: [\"build+deploy\", \"diag\"]  无参数时自动跑的任务名 (顺序)")
-        return 0
-
-    # ====================================================================
-    # --task <name> → 跑 ai_build.json 里 task 的 cmd
-    # ====================================================================
-    # 设计: 兼容 compile_tool.py 的 --task, 但 ac 自己消费, 跑 ai_build.json 的 task
-    if "--task" in args or "-t" in args:
-        tasks_list = local_config.get("tasks", [])
-        tasks_map = {t.get("name"): t for t in tasks_list if t.get("name")}
-        # 解析 --task 后的 value
-        task_name = None
-        i = 0
-        while i < len(args):
-            if args[i] in ("--task", "-t") and i + 1 < len(args):
-                task_name = args[i + 1]
-                break
-            i += 1
-        if not task_name:
-            print("❌ --task 需要指定任务名", file=sys.stderr)
-            return 1
-        if task_name not in tasks_map:
-            print(f"❌ ai_build.json 里没有任务 '{task_name}'", file=sys.stderr)
-            print(f"   可用: {list(tasks_map.keys())}", file=sys.stderr)
-            return 1
-        cmd = tasks_map[task_name].get("cmd", "")
-        if not cmd:
-            print(f"❌ 任务 '{task_name}' 的 cmd 为空", file=sys.stderr)
-            return 1
-        print(f"[AC-TASK] === {task_name} ===")
-        print(f"[AC-TASK] $ {cmd}")
-        env = os.environ.copy()
-        env["QT_QPA_PLATFORM"] = "offscreen"
-        rc = subprocess.call(["bash", "-c", cmd], env=env)
-        print(f"[AC-TASK] {task_name} 退出码 = {rc}")
-        return rc
-
-    # ====================================================================
-    # 无参数 + 有 ai_build.json → 自动跑 build+test (驾驶舱模式)
-    # ====================================================================
-    # 设计: 跑 `ac` 不带任何参数, 默认行为 = 编译 + 测试, 不弹 GUI.
-    #   - auto 字段: list of task name, 顺序执行
-    #   - auto 缺省: ["build+deploy", "diag"] (从 ai_build.json 的 tasks 里找)
-    #   - 加 --gui 强制弹 C++ GUI (覆盖 auto 模式)
-    if not args and local_config:
-        auto_tasks = local_config.get("auto") or ["build+deploy", "diag"]
-        tasks = {t.get("name"): t for t in local_config.get("tasks", []) if t.get("name")}
-        # 优先 tasks 数组; 如果 task name 不在 tasks, 当成 shell 命令
-        cmds_to_run = []
-        for name in auto_tasks:
-            if name in tasks:
-                cmds_to_run.append((name, tasks[name].get("cmd", "")))
-            else:
-                # fallback: 当成普通 shell 命令
-                cmds_to_run.append((name, name))
-        if cmds_to_run:
-            print(f"[AC-AUTO] 无参数启动, 跑 auto 链: {[n for n, _ in cmds_to_run]}")
-            env = os.environ.copy()
-            env["QT_QPA_PLATFORM"] = "offscreen"
-            for name, cmd in cmds_to_run:
-                if not cmd:
-                    print(f"[AC-AUTO] 跳过 {name} (cmd 为空)")
-                    continue
-                print(f"\n[AC-AUTO] === {name} ===")
-                print(f"[AC-AUTO] $ {cmd}")
-                # 用 bash -c 强制 bash (默认 sh 不支持 $(...) 替换, 进程替换, 数组等)
-                rc = subprocess.call(["bash", "-c", cmd], env=env)
-                print(f"[AC-AUTO] {name} 退出码 = {rc}")
-                if rc != 0:
-                    print(f"[AC-AUTO] {name} 失败, 停止后续 auto 任务")
-                    return rc
-            print(f"\n[AC-AUTO] 全部 auto 任务完成 ✓")
-            return 0
-
+    
     # 如果命令行没给 --cwd 或 -d，且配置里有，则补上
     if "--cwd" not in args and "-d" not in args and "cwd" in local_config:
         args.extend(["--cwd", local_config["cwd"]])
+    
+    # 处理 --task 参数: 从 ai_build.json 中查找对应的 task cmd
+    task_name = None
+    if "--task" in args:
+        idx = args.index("--task")
+        if idx + 1 < len(args):
+            task_name = args[idx + 1]
+    
+    if task_name and "tasks" in local_config:
+        for t in local_config["tasks"]:
+            if t.get("name") == task_name:
+                # 覆盖 --cmd 参数
+                if "--cmd" in args:
+                    c_idx = args.index("--cmd")
+                    if c_idx + 1 < len(args):
+                        args[c_idx + 1] = t["cmd"]
+                else:
+                    args.extend(["--cmd", t["cmd"]])
+                break
 
-    # 如果命令行没给 --cmd 或 -c，且配置里有，则补上
-    if "--cmd" not in args and "-c" not in args and "cmd" in local_config:
+    # 如果命令行没给 --cmd 或 -c，且配置里有，则补上 (仅当没指定 task 时)
+    if not task_name and "--cmd" not in args and "-c" not in args and "cmd" in local_config:
         args.extend(["--cmd", local_config["cmd"]])
 
     # 如果命令行没给 --test 或 -t，且配置里有，则补上
     if "--test" not in args and "-t" not in args and "test" in local_config:
         args.extend(["--test", local_config["test"]])
 
-    # 优先使用 C++ 版本 (ai_panel), 但 --offscreen 强制走 Python (compile_tool.py)
-    use_python = "--offscreen" in args
-    if use_python or not CPP_PANEL.exists():
-        if not COMPILE_TOOL.exists():
-            sys.stderr.write(f"✗ 找不到编译工具 (Python 版本 compile_tool.py 也不存在)\n")
-            return 1
-        # 走 Python 模式时, ac 自己消费 --offscreen, 不外传
-        # 同时只保留 compile_tool.py 认的参数 (--cwd/--cmd/--task/--preset/--cli)
-        _CT_ALLOWED = {"--cwd", "-d", "--cmd", "-c", "--task", "--preset", "--cli", "-h", "--help"}
-        filtered = []
-        skip_next = False
-        for a in args:
-            if a == "--offscreen":
-                continue  # 吞掉
-            if skip_next:
-                # 上一项是 consume-flag (例如 --test), 跳过这个值
-                skip_next = False
-                continue
-            if a in ("--test", "-t"):
-                skip_next = True
-                continue  # compile_tool.py 不认 --test
-            filtered.append(a)
-        # 只保留 compile_tool 认的 flag
-        cleaned = []
+    # 过滤掉 ac 自己的特殊参数
+    def filter_args(input_args, exclude_list):
+        res = []
         i = 0
-        while i < len(filtered):
-            a = filtered[i]
-            if a in _CT_ALLOWED:
-                cleaned.append(a)
-                # 如果是 consume-flag, 下一项也保留
-                if a in ("--cwd", "-d", "--cmd", "-c", "--task", "--preset"):
-                    if i + 1 < len(filtered):
-                        cleaned.append(filtered[i + 1])
+        while i < len(input_args):
+            arg = input_args[i]
+            if arg in exclude_list:
+                i += 1
+                # 如果是带参数的选项 (如 --test path)，也跳过其后的参数
+                if arg in ["--test", "--preset", "--task", "--cmd", "--cwd"]:
+                    if i < len(input_args) and not input_args[i].startswith("-"):
                         i += 1
+                continue
+            res.append(arg)
             i += 1
-        cmd = [sys.executable, str(COMPILE_TOOL)] + cleaned
+        return res
+
+    # 决定使用哪个后端
+    # 只有显式指定 --cli 时才使用 CLI 模式。
+    # --task, --preset, --offscreen 现在默认也走 GUI 模式以避免阻塞，除非同时指定了 --cli。
+    use_cli = "--cli" in args
+    
+    if CPP_PANEL.exists() and not use_cli:
+        # C++ 版本不认识 --offscreen 和 --cli
+        cmd = [str(CPP_PANEL)] + filter_args(args, ["--offscreen", "--cli"])
+    elif COMPILE_TOOL.exists():
+        # Python 版本认识 --cli, --task, --preset，但不认识 --offscreen 和 --test
+        # 移除强制添加 --cli 的逻辑，尊重用户是否选择 GUI 模式
+        cmd = [sys.executable, str(COMPILE_TOOL)] + filter_args(args, ["--offscreen", "--test"])
     else:
-        cmd = [str(CPP_PANEL)] + args
+        sys.stderr.write(f"✗ 找不到编译工具 (C++ 或 Python 版本)\n")
+        return 1
 
     # 透传环境 (确保 DISPLAY / WAYLAND_DISPLAY 不丢)
     env = os.environ.copy()
@@ -200,7 +111,17 @@ def main() -> int:
         env["QT_QPA_PLATFORM"] = "offscreen" if "--offscreen" in sys.argv else ""
 
     try:
-        return subprocess.call(cmd, env=env)
+        if use_cli:
+            # CLI 模式: 同步运行，显示输出
+            return subprocess.call(cmd, env=env)
+        else:
+            # GUI 模式: 异步启动，不阻塞终端，符合用户“不要让我点击”和“GUI 启动”的规则
+            # 2026-08-29: 使用 start_new_session=True 彻底分离进程，避免 ac 退出导致 GUI 挂掉
+            subprocess.Popen(cmd, env=env, start_new_session=True, 
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            print(f"🚀 AI Compile GUI 启动中... (后端: {'compile_tool.py' if COMPILE_TOOL.exists() else 'ai_panel'})")
+            print(f"💡 命令已透传，GUI 将自动开始执行。")
+            return 0
     except KeyboardInterrupt:
         return 130
     except Exception as e:
