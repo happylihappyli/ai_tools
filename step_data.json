@@ -347,6 +347,118 @@
       "title": "编译成功",
       "desc": "耗时: 10ms, 错误: 0, 警告: 0",
       "node_id": null
+    },
+    {
+      "id": 33,
+      "ts": "2026-08-30T08:53:27",
+      "type": "compile_start",
+      "title": "编译开始",
+      "desc": "Command: echo test (CWD: /home/bv/code/godot_ui_linux)",
+      "node_id": null
+    },
+    {
+      "id": 34,
+      "ts": "2026-08-30T08:53:27",
+      "type": "compile_finish",
+      "title": "编译成功",
+      "desc": "耗时: 9ms, 错误: 0, 警告: 0",
+      "node_id": null
+    },
+    {
+      "id": 35,
+      "ts": "2026-08-31T14:04:18",
+      "type": "compile_start",
+      "title": "编译开始",
+      "desc": "Command: python3 /home/bv/code/godot_ui_linux/godot-ui-standalone-skia/run_rebuild_v6_scene_tree_gui.py --auto (CWD: /home/bv/code/godot_ui_linux)",
+      "node_id": null
+    },
+    {
+      "id": 36,
+      "ts": "2026-08-31T14:04:53",
+      "type": "compile_finish",
+      "title": "编译成功",
+      "desc": "耗时: 35351ms, 错误: 10, 警告: 2",
+      "node_id": null
+    },
+    {
+      "id": 37,
+      "ts": "2026-08-31T14:06:16",
+      "type": "compile_start",
+      "title": "编译开始",
+      "desc": "Command: python3 /home/bv/code/godot_ui_linux/godot-ui-standalone-skia/run_rebuild_v6_scene_tree_gui.py --auto (CWD: /home/bv/code/godot_ui_linux)",
+      "node_id": null
+    },
+    {
+      "id": 38,
+      "ts": "2026-08-31T14:06:36",
+      "type": "compile_finish",
+      "title": "编译成功",
+      "desc": "耗时: 19742ms, 错误: 10, 警告: 2",
+      "node_id": null
+    },
+    {
+      "id": 39,
+      "ts": "2026-08-31T14:21:48",
+      "type": "compile_start",
+      "title": "编译开始",
+      "desc": "Command: python3 /home/bv/code/godot_ui_linux/godot-ui-standalone-skia/run_rebuild_v6_scene_tree_gui.py --auto (CWD: /home/bv/code/godot_ui_linux)",
+      "node_id": null
+    },
+    {
+      "id": 40,
+      "ts": "2026-08-31T14:22:44",
+      "type": "compile_finish",
+      "title": "编译成功",
+      "desc": "耗时: 55180ms, 错误: 10, 警告: 2",
+      "node_id": null
+    },
+    {
+      "id": 41,
+      "ts": "2026-08-31T14:23:16",
+      "type": "compile_start",
+      "title": "编译开始",
+      "desc": "Command: python3 /home/bv/code/godot_ui_linux/godot-ui-standalone-skia/run_rebuild_v6_scene_tree_gui.py --auto (CWD: /home/bv/code/godot_ui_linux)",
+      "node_id": null
+    },
+    {
+      "id": 42,
+      "ts": "2026-08-31T14:23:44",
+      "type": "compile_finish",
+      "title": "编译成功",
+      "desc": "耗时: 27383ms, 错误: 10, 警告: 2",
+      "node_id": null
+    },
+    {
+      "id": 43,
+      "ts": "2026-08-31T14:27:24",
+      "type": "compile_start",
+      "title": "编译开始",
+      "desc": "Command: python3 /home/bv/code/godot_ui_linux/godot-ui-standalone-skia/diag_scene_tree_30s.py --auto --save (CWD: /home/bv/code/godot_ui_linux)",
+      "node_id": null
+    },
+    {
+      "id": 44,
+      "ts": "2026-08-31T14:27:58",
+      "type": "compile_finish",
+      "title": "编译成功",
+      "desc": "耗时: 33848ms, 错误: 8, 警告: 3",
+      "node_id": null
+    },
+    {
+      "id": 45,
+      "ts": "2026-08-31T21:22:44",
+      "type": "compile_start",
+      "title": "编译开始",
+      "desc": "Command: ./bin/gn gen out/Static 2>&1 | tail -10 (CWD: /home/bv/code/skia_build/skia)",
+      "node_id": null
+    },
+    {
+      "id": 46,
+      "ts": "2026-08-31T21:22:44",
+      "type": "compile_finish",
+      "title": "编译成功",
+      "desc": "耗时: 138ms, 错误: 10, 警告: 0",
+      "node_id": null
     }
   ],
   "current_node": "task_1787898802"

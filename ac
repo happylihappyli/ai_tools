@@ -23,15 +23,28 @@ CPP_PANEL = GT_DIR / "cpp_panel" / "ai_panel"
 
 
 def load_local_config():
-    """从当前目录读取 ai_build.json 配置"""
-    config_path = Path.cwd() / "ai_build.json"
-    if config_path.exists():
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            sys.stderr.write(f"⚠ 读取 ai_build.json 失败: {e}\n")
-    return {}
+    """从当前目录往上找 ai_build.json, 像 git 找 .git 一样.
+
+    找到第一个就停 (不会跨过 home 目录边界). 找不到返回 {}.
+    找到时把所在目录塞进 _resolved_dir 字段, 方便 task 知道用哪个目录.
+    """
+    cur = Path.cwd().resolve()
+    # 找 .trae 这种 workspace 标记也行, 但先简单: 一直往上到 /
+    while True:
+        config_path = cur / "ai_build.json"
+        if config_path.is_file():
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                cfg["_resolved_dir"] = str(cur)
+                return cfg
+            except Exception as e:
+                sys.stderr.write(f"⚠ 读取 {config_path} 失败: {e}\n")
+                return {}
+        parent = cur.parent
+        if parent == cur:  # 到 / 了
+            return {}
+        cur = parent
 
 
 def main() -> int:
