@@ -31,10 +31,12 @@ PROJECT_DIR = "/home/bv/code/godot_ui_linux/godot-ui-standalone-skia"
 AC_DIR = "/home/bv/code/ai_tools"
 AC_BIN = f"{AC_DIR}/ac"
 
-# 命令行参数
+# 解析 argv (简单, 不引 argparse 避免冲突)
 AUTO_START = True
 TASK_NAME = None
 QT_PLATFORM = os.environ.get("QT_QPA_PLATFORM", "")  # 空=用系统默认 (Wayland/X11)
+DOCTOR_MODE = False
+SHOW_DOCTOR = False
 
 # 解析 argv (简单, 不引 argparse 避免冲突)
 for a in sys.argv[1:]:
@@ -50,13 +52,24 @@ for a in sys.argv[1:]:
         PROJECT_DIR = a.split("=", 1)[1]
     elif a == "--project" and len(sys.argv) > sys.argv.index(a) + 1:
         PROJECT_DIR = sys.argv[sys.argv.index(a) + 1]
+    elif a in ("--doctor",):
+        DOCTOR_MODE = True
+        AUTO_START = False
     elif a in ("-h", "--help"):
         print(__doc__)
         sys.exit(0)
 
 # 加 ai_tools 到 sys.path (复用 _qt_compat)
 sys.path.insert(0, AC_DIR)
-os.environ.setdefault("QT_QPA_PLATFORM", QT_PLATFORM or "offscreen")
+
+# Qt 平台默认值: 优先用命令行 --platform, 再用 env, 最后按显示环境自动选
+# - 本地有 DISPLAY/WAYLAND: 留空让 Qt 自动选 (xcb/wayland)
+# - 沙箱/SSH/无显示: 用 offscreen (不然会崩)
+_HAS_DISPLAY = bool(os.environ.get("DISPLAY")) or bool(os.environ.get("WAYLAND_DISPLAY"))
+if not QT_PLATFORM and "QT_QPA_PLATFORM" not in os.environ:
+    if not _HAS_DISPLAY:
+        os.environ["QT_QPA_PLATFORM"] = "offscreen"
+        QT_PLATFORM = "offscreen"
 
 from _qt_compat import (
     QT_BACKEND, APP_EXEC, gui_available,
@@ -615,6 +628,10 @@ class AcMainWindow(QMainWindow):
 
 
 def main() -> int:
+    # ===== 自检模式: 检查 GUI 环境 =====
+    if DOCTOR_MODE:
+        return run_doctor()
+
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
@@ -622,6 +639,82 @@ def main() -> int:
     w = AcMainWindow()
     w.show()
     return getattr(app, APP_EXEC)()
+
+
+def run_doctor() -> int:
+    """检查本地 GUI 环境: DISPLAY/WAYLAND_DISPLAY/Qt 后端/平台插件"""
+    print("=" * 60)
+    print(f"  {APP_NAME} — 环境自检")
+    print("=" * 60)
+
+    # 1) 显示环境
+    has_display = "DISPLAY" in os.environ and os.environ["DISPLAY"]
+    has_wayland = "WAYLAND_DISPLAY" in os.environ and os.environ["WAYLAND_DISPLAY"]
+    has_xdg = "XDG_SESSION_TYPE" in os.environ
+    print(f"\n[1] 显示环境变量")
+    print(f"  DISPLAY          = {os.environ.get('DISPLAY', '(未设)')}")
+    print(f"  WAYLAND_DISPLAY  = {os.environ.get('WAYLAND_DISPLAY', '(未设)')}")
+    print(f"  XDG_SESSION_TYPE = {os.environ.get('XDG_SESSION_TYPE', '(未设)')}")
+    if not has_display and not has_wayland:
+        print(f"  ⚠ 既没 DISPLAY 也没 WAYLAND_DISPLAY, Qt 弹不出窗口!")
+        print(f"    → 必须 ssh -X 或在本地桌面环境跑")
+    else:
+        print(f"  ✓ 显示环境已设")
+
+    # 2) Qt 后端
+    import _qt_compat
+    print(f"\n[2] Qt 后端")
+    print(f"  QT_BACKEND (代码检测) = {QT_BACKEND}")
+    print(f"  PYQT_VERSION_STR      = {_qt_compat.PYQT_VERSION_STR}")
+    print(f"  GUI available         = {gui_available()}")
+    if not gui_available():
+        print(f"  ✗ 没有可用的 Qt 后端! 安装: pip install PySide6")
+        return 1
+
+    # 3) Qt 平台插件
+    print(f"\n[3] Qt 平台插件 (QPA)")
+    print(f"  QT_QPA_PLATFORM (env)  = {os.environ.get('QT_QPA_PLATFORM', '(未设=用默认)')}")
+    print(f"  默认会按 XDG_SESSION_TYPE 自动选 (wayland/xcb/...)")
+
+    # 4) 测试创建一个隐藏窗口看是否成功
+    print(f"\n[4] 测试创建 QApplication...")
+    try:
+        test_app = QApplication.instance() or QApplication(sys.argv[:1] + ["ac-gui-test"])
+        print(f"  ✓ QApplication 创建成功, platform = {test_app.platformName()}")
+        # 尝试建一个 test 窗口
+        test_w = QWidget()
+        test_w.resize(100, 100)
+        test_w.show()
+        print(f"  ✓ test 窗口创建成功, visible={test_w.isVisible()}")
+        test_w.close()
+    except Exception as e:
+        print(f"  ✗ 创建 QApplication 失败: {e}")
+        return 1
+
+    # 5) 项目配置
+    print(f"\n[5] 项目配置")
+    print(f"  PROJECT_DIR = {PROJECT_DIR}")
+    p = Path(PROJECT_DIR)
+    if p.exists():
+        print(f"  ✓ 项目目录存在")
+        ab = p / "ai_build.json"
+        print(f"  ai_build.json = {'存在 ✓' if ab.exists() else '不存在 ✗'}")
+    else:
+        print(f"  ✗ 项目目录不存在!")
+
+    print(f"\n[6] 建议")
+    if not has_display and not has_wayland:
+        print(f"  1. 终端连 SSH? 用 'ssh -X user@host' 转发 X11")
+        print(f"  2. 或者 'ssh -Y' (trusted forwarding)")
+        print(f"  3. 本地用户? 直接在桌面终端跑, 不要在远程 SSH")
+        print(f"  4. 想看日志不弹窗? 用 'ac-gui --no-auto' + 强制 offscreen:")
+        print(f"     QT_QPA_PLATFORM=offscreen ac-gui --no-auto")
+    else:
+        print(f"  显示环境正常, 直接跑 'ac-gui' 应该能弹窗口")
+        print(f"  如果还是没弹, 试 'ac-gui --no-auto' 手动点 [⚡ 跑 Auto 链]")
+
+    print()
+    return 0
 
 
 if __name__ == "__main__":
