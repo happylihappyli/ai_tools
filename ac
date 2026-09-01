@@ -8,7 +8,20 @@ ac — AI 编译工具启动器 (AI Compile)
     ac --cwd /path/to/proj      # 指定工作目录
     ac --cmd "scons ..."        # 指定编译命令
     ac --test "./run.sh"        # 指定测试命令
+    ac --cli --cmd "..."        # CLI 模式 (同步运行, 不弹 GUI)
+    ac --offscreen              # headless 模式 (沙箱/SSH)
     ac help                     # 显示帮助
+
+子命令 (转发到 ai_tools 同目录的工具脚本):
+    ac tts "消息"               # 文字转语音 (spd-say 包装)
+    ac bak <file> [<file>...]   # 备份文件 (带时间戳 .bak)
+    ac tts help                 # tts 帮助
+    ac bak help                 # bak 帮助
+
+编译事件自动 tts 播报:
+    编译完成 (rc=0) → tts "编译成功"
+    编译失败 (rc!=0) → tts "编译失败"
+    关闭: --no-tts (或环境变量 AC_NO_TTS=1)
 """
 import os
 import sys
@@ -20,6 +33,41 @@ from pathlib import Path
 GT_DIR = Path(__file__).resolve().parent
 COMPILE_TOOL = GT_DIR / "compile_tool.py"
 CPP_PANEL = GT_DIR / "cpp_panel" / "ai_panel"
+TTS_TOOL = GT_DIR / "tts"
+BAK_TOOL = GT_DIR / "bak"
+
+# ac 自己的子命令 (会拦截并转发, 不走 compile 后端)
+SUBCOMMANDS = {"tts", "bak"}
+
+
+def tts_async(event: str, n: int = 0) -> None:
+    """异步调 tts 工具播报事件 (不阻塞当前流程)"""
+    if not TTS_TOOL.exists():
+        return
+    cmd = [sys.executable, str(TTS_TOOL), "--event", event]
+    if n:
+        cmd += ["-n", str(n)]
+    try:
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass  # tts 失败不影响主流程
+
+
+def dispatch_subcommand(args: list) -> int:
+    """ac tts ... / ac bak ... 转发"""
+    if not args:
+        return 1
+    sub = args[0]
+    if sub == "tts":
+        tool = TTS_TOOL
+    elif sub == "bak":
+        tool = BAK_TOOL
+    else:
+        return 1
+    if not tool.exists():
+        sys.stderr.write(f"✗ 找不到子命令工具: {tool}\n")
+        return 1
+    return subprocess.call([sys.executable, str(tool)] + args[1:])
 
 
 def load_local_config():
@@ -39,6 +87,10 @@ def main() -> int:
 
     args = sys.argv[1:]
 
+    # 子命令拦截: ac tts / ac bak → 直接转发, 不走 compile 后端
+    if args and args[0] in SUBCOMMANDS:
+        return dispatch_subcommand(args)
+
     # 处理 help 参数: 打印帮助并退出 (不启动 GUI, 跟 .trae/rules/ac_only.md 一致)
     if "--help" in args or "-h" in args or "help" in args:
         print(__doc__)
@@ -47,14 +99,14 @@ def main() -> int:
     # 如果命令行没给 --cwd 或 -d，且配置里有，则补上
     if "--cwd" not in args and "-d" not in args and "cwd" in local_config:
         args.extend(["--cwd", local_config["cwd"]])
-    
+
     # 处理 --task 参数: 从 ai_build.json 中查找对应的 task cmd
     task_name = None
     if "--task" in args:
         idx = args.index("--task")
         if idx + 1 < len(args):
             task_name = args[idx + 1]
-    
+
     if task_name and "tasks" in local_config:
         for t in local_config["tasks"]:
             if t.get("name") == task_name:
@@ -74,6 +126,10 @@ def main() -> int:
     # 如果命令行没给 --test 或 -t，且配置里有，则补上
     if "--test" not in args and "-t" not in args and "test" in local_config:
         args.extend(["--test", local_config["test"]])
+
+    # 是否关闭 tts 自动播报 (从 args 早期消费, 避免透传给 compile_tool.py)
+    tts_enabled = ("--no-tts" not in args and os.environ.get("AC_NO_TTS") != "1")
+    args = [a for a in args if a != "--no-tts"]
 
     # 过滤掉 ac 自己的特殊参数
     def filter_args(input_args, exclude_list):
@@ -96,7 +152,7 @@ def main() -> int:
     # 只有显式指定 --cli 时才使用 CLI 模式。
     # --task, --preset, --offscreen 现在默认也走 GUI 模式以避免阻塞，除非同时指定了 --cli。
     use_cli = "--cli" in args
-    
+
     if CPP_PANEL.exists() and not use_cli:
         # C++ 版本不认识 --offscreen 和 --cli
         cmd = [str(CPP_PANEL)] + filter_args(args, ["--offscreen", "--cli"])
@@ -118,11 +174,18 @@ def main() -> int:
     try:
         if use_cli:
             # CLI 模式: 同步运行，显示输出
-            return subprocess.call(cmd, env=env)
+            rc = subprocess.call(cmd, env=env)
+            # 编译事件自动 tts 播报
+            if tts_enabled:
+                if rc == 0:
+                    tts_async("compile_ok")
+                else:
+                    tts_async("compile_fail", n=0)
+            return rc
         else:
-            # GUI 模式: 异步启动，不阻塞终端，符合用户“不要让我点击”和“GUI 启动”的规则
+            # GUI 模式: 异步启动，不阻塞终端，符合用户"不要让我点击"和"GUI 启动"的规则
             # 2026-08-29: 使用 start_new_session=True 彻底分离进程，避免 ac 退出导致 GUI 挂掉
-            subprocess.Popen(cmd, env=env, start_new_session=True, 
+            subprocess.Popen(cmd, env=env, start_new_session=True,
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             print(f"🚀 AI Compile GUI 启动中... (后端: {'compile_tool.py' if COMPILE_TOOL.exists() else 'ai_panel'})")
             print(f"💡 命令已透传，GUI 将自动开始执行。")

@@ -11,3 +11,6 @@ step_data.json
 /cpp_panel/ai_panel
 /cpp_panel/ai_panel.exe
 *.exe
+
+# bak 工具产生的备份 (按 .YYYYMMDD_HHMMSS.bak 后缀)
+*.YYYYMMDD_HHMMSS.bak
