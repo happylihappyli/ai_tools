@@ -318,10 +318,13 @@ class AcMainWindow(QMainWindow):
         self._btn_run = QPushButton("▶ 跑选中任务")
         self._btn_stop = QPushButton("■ 停止")
         self._btn_auto = QPushButton("⚡ 跑 Auto 链")
+        self._btn_run_cloud = QPushButton("🚀 启动 cloud_main")
         self._btn_stop.setEnabled(False)
+        self._btn_run_cloud.setEnabled(False)  # 编译成功后启用
         ctrl_row.addWidget(self._btn_run)
         ctrl_row.addWidget(self._btn_stop)
         ctrl_row.addWidget(self._btn_auto)
+        ctrl_row.addWidget(self._btn_run_cloud)
         ctrl_row.addStretch(1)
         layout.addLayout(ctrl_row)
 
@@ -345,11 +348,14 @@ class AcMainWindow(QMainWindow):
         self._btn_run.clicked.connect(self.on_run_selected)
         self._btn_auto.clicked.connect(self.on_run_auto)
         self._btn_stop.clicked.connect(self.on_stop)
+        self._btn_run_cloud.clicked.connect(self.on_run_cloud_main)
 
         self._log("info", f"{APP_NAME} v{APP_VERSION} 启动")
         self._log("info", f"项目: {PROJECT_DIR}")
         self._log("info", f"任务数: {len(self._tasks)}")
         self._log("info", f"Qt 后端: {QT_BACKEND}")
+        # 启动时检查 cloud_main 是否已存在 (可能之前编过)
+        self._check_and_enable_cloud_main()
         # 同步主题菜单打勾
         self._sync_theme_actions(ac_themes.get_current_theme())
 
@@ -383,6 +389,17 @@ class AcMainWindow(QMainWindow):
         self.act_bak = QAction("备份当前项目...", self)
         self.act_bak.setShortcut(QKeySequence("Ctrl+B"))
         self.act_bak.triggered.connect(self.on_bak_project)
+
+        # 启动 cloud_main (编译成功后启用)
+        self.act_run_cloud = QAction("🚀 启动 cloud_main", self)
+        self.act_run_cloud.setShortcut(QKeySequence("Ctrl+R"))
+        self.act_run_cloud.setEnabled(False)  # 编译成功后才启用
+        self.act_run_cloud.triggered.connect(self.on_run_cloud_main)
+
+        # 编译+启动 一气呵成
+        self.act_build_and_run = QAction("⚡ 编译并启动 cloud_main", self)
+        self.act_build_and_run.setShortcut(QKeySequence("Ctrl+Shift+R"))
+        self.act_build_and_run.triggered.connect(self.on_build_and_run)
 
         self.act_toggle_log = QAction("显示日志面板", self)
         self.act_toggle_log.setCheckable(True)
@@ -422,6 +439,9 @@ class AcMainWindow(QMainWindow):
         m_run.addAction(self.act_run_selected)
         m_run.addAction(self.act_run_auto)
         m_run.addAction(self.act_stop)
+        m_run.addSeparator()
+        m_run.addAction(self.act_run_cloud)
+        m_run.addAction(self.act_build_and_run)
 
         m_tools = mb.addMenu("工具(&T)")
         m_tools.addAction(self.act_open_ght)
@@ -449,6 +469,9 @@ class AcMainWindow(QMainWindow):
         tb.addAction(self.act_run_selected)
         tb.addAction(self.act_run_auto)
         tb.addAction(self.act_stop)
+        tb.addSeparator()
+        tb.addAction(self.act_run_cloud)
+        tb.addAction(self.act_build_and_run)
         tb.addSeparator()
         tb.addAction(self.act_open_ght)
         tb.addAction(self.act_tts)
@@ -587,10 +610,14 @@ class AcMainWindow(QMainWindow):
                   f"[{task_name}] 退出码 {exit_code}  耗时 {elapsed:.1f}s")
         tts_async(f"task {task_name} {'成功' if exit_code == 0 else '失败'}")
         self._prog_label.setText(f"当前: — (上次: {task_name}, rc={exit_code}, {elapsed:.1f}s)")
-        self._prog_bar.setVisible(False)
         self._btn_run.setEnabled(True)
         self._btn_auto.setEnabled(True)
         self._btn_stop.setEnabled(False)
+        self._prog_bar.setVisible(False)
+        # 编译类 task 成功后: 检查 cloud_main 二进制, 启用"启动 cloud_main"按钮
+        if exit_code == 0 and task_name in ("build+deploy", "build-only"):
+            self._check_and_enable_cloud_main()
+        # 链式回调 (auto 链里下一步)
         on_done = getattr(self, "_current_on_done", None)
         if on_done:
             self._current_on_done = None
@@ -598,6 +625,80 @@ class AcMainWindow(QMainWindow):
 
     def on_proc_error(self, task_name, err):
         self._log("err", f"[{task_name}] QProcess 错误: {err}")
+
+    # ===== cloud_main 启动逻辑 =====
+
+    def _find_cloud_main_binary(self) -> Path | None:
+        """在 bin/Debug 或 bin/Release 找 cloud_main 二进制"""
+        for sub in ("Debug", "Release"):
+            p = Path(PROJECT_DIR) / "bin" / sub / "cloud_main"
+            if p.exists() and os.access(p, os.X_OK):
+                return p
+        # 也找一下旧版 (没 _main 后缀)
+        for sub in ("Debug", "Release"):
+            p = Path(PROJECT_DIR) / "bin" / sub / "cloud"
+            if p.exists() and os.access(p, os.X_OK):
+                return p
+        return None
+
+    def _check_and_enable_cloud_main(self):
+        """编译成功后, 找 cloud_main 二进制, 启用按钮"""
+        binary = self._find_cloud_main_binary()
+        if binary:
+            self._cloud_main_binary = binary
+            self.act_run_cloud.setEnabled(True)
+            self._btn_run_cloud.setEnabled(True)
+            self._log("ok", f"✓ cloud_main 已就绪: {binary.relative_to(Path(PROJECT_DIR))}")
+            # 状态栏右侧更新
+            if hasattr(self, "_sb_right"):
+                self._sb_right.setText(
+                    f"Qt={QT_BACKEND} | 主题={ac_themes.THEMES[ac_themes.get_current_theme()]['name']} | ✓ cloud_main"
+                )
+        else:
+            self._log("warn", "✗ 编译后没找到 bin/Debug/cloud_main")
+
+    def on_run_cloud_main(self):
+        """启动 cloud_main (前台, 阻塞当前进程直到退出)"""
+        if not getattr(self, "_cloud_main_binary", None):
+            binary = self._find_cloud_main_binary()
+            if not binary:
+                QMessageBox.warning(
+                    self, "未找到",
+                    f"bin/Debug/cloud_main 不存在\n请先跑 'build+deploy' 编译"
+                )
+                return
+            self._cloud_main_binary = binary
+        self._log("task", f"🚀 启动 cloud_main: {self._cloud_main_binary}")
+        self._log("info", "参数: --rendering-driver vulkan --rendering-method forward_plus")
+        tts_async("启动 cloud_main")
+        try:
+            # 前台跑 (阻塞, 用户能看到 cloud_main 窗口). 用 subprocess.run 同步.
+            # 传 env: 让用户本地默认 wayland + nvidia vulkan
+            env = os.environ.copy()
+            env.setdefault("VK_ICD_FILENAMES", "/usr/share/vulkan/icd.d/nvidia_icd.json")
+            result = subprocess.run(
+                [str(self._cloud_main_binary),
+                 "--rendering-driver", "vulkan",
+                 "--rendering-method", "forward_plus"],
+                cwd=PROJECT_DIR,
+                env=env,
+            )
+            self._log("ok" if result.returncode == 0 else "err",
+                      f"cloud_main 退出 (rc={result.returncode})")
+        except Exception as e:
+            self._log("err", f"启动 cloud_main 失败: {e}")
+            QMessageBox.critical(self, "启动失败", str(e))
+
+    def on_build_and_run(self):
+        """编译 + 启动 cloud_main 一气呵成"""
+        self._log("task", "⚡ 编译并启动 cloud_main")
+        # 复用 build+deploy 任务链, 完后回调启动
+        def _after_build():
+            if self._find_cloud_main_binary():
+                self.on_run_cloud_main()
+            else:
+                self._log("err", "编译完成但没找到 cloud_main 二进制")
+        self._run_task("build+deploy", on_done=_after_build)
 
     # ===== 工具菜单槽函数 =====
 
