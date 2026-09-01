@@ -1,0 +1,5 @@
+#!/bin/sh
+# github-token-gui shell wrapper: 委托给 github_token_gui.py
+SELF="$(readlink -f "$0")"
+SELF_DIR="$(dirname "$SELF")"
+exec python3 "$SELF_DIR/github_token_gui.py" "$@"

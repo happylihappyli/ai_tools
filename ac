@@ -15,8 +15,13 @@ ac — AI 编译工具启动器 (AI Compile)
 子命令 (转发到 ai_tools 同目录的工具脚本):
     ac tts "消息"               # 文字转语音 (spd-say 包装)
     ac bak <file> [<file>...]   # 备份文件 (带时间戳 .bak)
+    ac ght                      # GitHub Token 管理 (GUI, 自动诊断)
+    ac ght-cli                  # GitHub Token CLI 诊断
+    ac ght-url                  # 打印 GitHub 生成 token 的 URL
+    ac ght-setup                # 打印 step-by-step 生成指引
     ac tts help                 # tts 帮助
     ac bak help                 # bak 帮助
+    ac ght --help               # ght 帮助
 
 编译事件自动 tts 播报:
     编译完成 (rc=0) → tts "编译成功"
@@ -35,9 +40,11 @@ COMPILE_TOOL = GT_DIR / "compile_tool.py"
 CPP_PANEL = GT_DIR / "cpp_panel" / "ai_panel"
 TTS_TOOL = GT_DIR / "tts"
 BAK_TOOL = GT_DIR / "bak"
+GHT_TOOL = GT_DIR / "github_token"
+GHT_GUI = GT_DIR / "github_token_gui"
 
 # ac 自己的子命令 (会拦截并转发, 不走 compile 后端)
-SUBCOMMANDS = {"tts", "bak"}
+SUBCOMMANDS = {"tts", "bak", "ght", "ght-cli", "ght-url", "ght-setup"}
 
 
 def tts_async(event: str, n: int = 0) -> None:
@@ -54,10 +61,37 @@ def tts_async(event: str, n: int = 0) -> None:
 
 
 def dispatch_subcommand(args: list) -> int:
-    """ac tts ... / ac bak ... 转发"""
+    """ac tts ... / ac bak ... / ac ght ... 转发
+
+    注意: 工具脚本自己带 shebang, 用 OS 自动选解释器, 不要强制走 sys.executable.
+    之前 `subprocess.call([sys.executable, str(tool)] + ...)` 会强制用 python 解释器,
+    但 github_token / github_token_gui 是 shell wrapper, 会 SyntaxError.
+    """
     if not args:
         return 1
     sub = args[0]
+    # GitHub Token 变体
+    if sub == "ght":
+        # 默认启动 GUI, 自动诊断
+        if not GHT_GUI.exists():
+            sys.stderr.write(f"✗ 找不到 GUI: {GHT_GUI}\n")
+            return 1
+        # 剩余参数透传给 GUI
+        gui_args = args[1:] if args[1:] else ["--auto-check"]
+        return subprocess.call([str(GHT_GUI)] + gui_args)
+    if sub == "ght-cli":
+        if not GHT_TOOL.exists():
+            sys.stderr.write(f"✗ 找不到 CLI: {GHT_TOOL}\n")
+            return 1
+        return subprocess.call([str(GHT_TOOL)] + (args[1:] or ["--diagnose"]))
+    if sub == "ght-url":
+        if not GHT_TOOL.exists():
+            return 1
+        return subprocess.call([str(GHT_TOOL), "--url"])
+    if sub == "ght-setup":
+        if not GHT_TOOL.exists():
+            return 1
+        return subprocess.call([str(GHT_TOOL), "--setup"])
     if sub == "tts":
         tool = TTS_TOOL
     elif sub == "bak":
@@ -67,7 +101,7 @@ def dispatch_subcommand(args: list) -> int:
     if not tool.exists():
         sys.stderr.write(f"✗ 找不到子命令工具: {tool}\n")
         return 1
-    return subprocess.call([sys.executable, str(tool)] + args[1:])
+    return subprocess.call([str(tool)] + args[1:])
 
 
 def load_local_config():
