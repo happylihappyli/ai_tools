@@ -6,7 +6,7 @@
 //   ab --config ai_build.json   # 指定配置文件
 //   ab --no-auto                # 不自动跑 auto 链
 //   ab --doctor                 # 环境自检
-//   ab --theme dark|light       # 强制主题
+//   ab --theme dark|light|solarized|nord  # 强制主题 (2026-09-02: 加 solarized + nord)
 //   ab --help                   # 帮助
 
 #include <QApplication>
@@ -35,7 +35,7 @@ static void printHelp() {
         << "  ab --config /path/to/ai_build.json\n"
         << "  ab --no-auto                    # 不自动跑 auto 链\n"
         << "  ab --doctor                     # 环境自检\n"
-        << "  ab --theme dark|light           # 强制主题\n"
+        << "  ab --theme dark|light|solarized|nord  # 强制主题\n"
         << "  ab --help                       # 帮助\n"
         << "\n"
         << "ai_build.json 示例 ui 段:\n"
@@ -64,8 +64,19 @@ static int runDoctor() {
     std::cout << "  QT_VERSION=" << qVersion() << "\n";
     std::cout << "  platform=" << QApplication::platformName().toStdString() << "\n";
 
-    std::cout << "\n[3] 默认主题: "
-        << (AbTheme::current() == AbTheme::Dark ? "dark" : "light") << "\n";
+    std::cout << "\n[3] 当前主题 (theme.json): "
+        << AbTheme::shortName(AbTheme::current()).toStdString() << "\n";
+
+    // 2026-09-02: 4 主题 QSS dry-run 验证, 不写 theme.json
+    std::cout << "\n[4] 内嵌 QSS 验证 (4 主题 dry-run, 不写 theme.json):\n";
+    for (int k = 0; k < AbTheme::NumThemes; ++k) {
+        QString name = AbTheme::shortName(k);
+        QString qss = AbTheme::embeddedQssForTest(k);
+        QString firstLine = qss.section('\n', 1, 1).trimmed();
+        std::cout << "  " << name.toStdString()
+                  << "  len=" << qss.length()
+                  << "  starts=\"" << firstLine.toStdString() << "\"\n";
+    }
     return 0;
 }
 
@@ -107,7 +118,13 @@ int main(int argc, char** argv) {
         }
     }
 
-    if (doctorMode) return runDoctor();
+    if (doctorMode) {
+        // 2026-09-02: --doctor 也支持 --theme 强制应用 (写 theme.json)
+        if (!forcedTheme.isEmpty()) {
+            AbTheme::apply(static_cast<int>(AbTheme::parse(forcedTheme)));
+        }
+        return runDoctor();
+    }
 
     // 找配置
     if (configPath.isEmpty()) {

@@ -62,6 +62,11 @@ public slots:
 
 private:
     void buildFromConfig();
+    // 2026-09-02: 框架内置通用 UI (所有调试程序都需要, 不依赖 ai_build.json)
+    void buildBuiltInMenus();   // 文件/工具/视图/帮助 (含 GitHub Token / TTS / 备份 / 退出)
+    void buildBuiltInToolbar(); // ▶跑选中 / ⚡跑 Auto / ■停止
+    void buildBuiltInButtons(); // 编译并启动 / 启动 cloud_main / 停止 (仅 run_after_build 时)
+    // ai_build.json 里的 ui 段只配项目特定部分, 在内置 UI 之后追加
     void buildMenus();
     void buildToolbar();
     void buildMainButtons();

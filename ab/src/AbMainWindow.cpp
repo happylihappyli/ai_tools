@@ -89,13 +89,169 @@ void AbMainWindow::wireRunner() {
 void AbMainWindow::buildFromConfig() {
     buildTaskList();
     buildStatusBar();
-    buildMenus();
-    buildToolbar();
-    buildMainButtons();
+    buildBuiltInMenus();   // 2026-09-02: 框架内置通用菜单 (GitHub Token/TTS/备份/视图/帮助)
+    buildBuiltInToolbar(); // 2026-09-02: 框架内置通用工具栏 (跑选中/跑 Auto/停止)
+    buildBuiltInButtons();  // 2026-09-02: 框架内置通用按钮 (编译并启动/启动/停止) - 仅当 run_after_build 有
+    buildMenus();           // 配置文件追加: "运行" 菜单 (项目特定)
+    buildToolbar();         // 配置文件追加: 工具栏 (项目特定, e.g. TTS 按钮)
+    buildMainButtons();     // 配置文件追加: 主按钮行 (项目特定, e.g. 自定义任务)
     if (cfg_.show_log_dock) {
         log_dock_ = new AbLogDock(this);
         addDockWidget(Qt::BottomDockWidgetArea, log_dock_);
     }
+}
+
+// 2026-09-02: 框架内置通用菜单 (所有调试程序都需要)
+//   - 文件: GitHub Token / 备份 / 退出
+//   - 工具: GitHub Token 诊断 / TTS 播报 / 代理测试
+//   - 视图: 显示日志 / 切换主题
+//   - 帮助: 关于
+// ai_build.json 不再需要配这些, 减少冗余
+void AbMainWindow::buildBuiltInMenus() {
+    QMenuBar* mb = menuBar();
+
+    // --- 文件 (&F) ---
+    QMenu* m_file = mb->addMenu("文件(&F)");
+    {
+        QAction* a = m_file->addAction("GitHub Token 管理...");
+        a->setShortcut(QKeySequence("Ctrl+G"));
+        a->setData("open_ght");
+        connect(a, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
+        actions_["open_ght"] = a;
+    }
+    {
+        QAction* a = m_file->addAction("备份项目...");
+        a->setShortcut(QKeySequence("Ctrl+B"));
+        a->setData("bak");
+        connect(a, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
+        actions_["bak"] = a;
+    }
+    m_file->addSeparator();
+    {
+        QAction* a = m_file->addAction("退出");
+        a->setShortcut(QKeySequence("Ctrl+Q"));
+        a->setData("quit");
+        connect(a, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
+        actions_["quit"] = a;
+    }
+
+    // --- 工具 (&T) ---
+    QMenu* m_tools = mb->addMenu("工具(&T)");
+    {
+        QAction* a = m_tools->addAction("GitHub Token 诊断");
+        a->setShortcut(QKeySequence("Ctrl+D"));
+        a->setData("diag");
+        connect(a, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
+        actions_["diag"] = a;
+    }
+    {
+        QAction* a = m_tools->addAction("代理测试...");
+        a->setShortcut(QKeySequence("Ctrl+P"));
+        a->setData("proxy_test");
+        connect(a, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
+        actions_["proxy_test"] = a;
+    }
+    m_tools->addSeparator();
+    {
+        QAction* a = m_tools->addAction("TTS 播报...");
+        a->setShortcut(QKeySequence("Ctrl+T"));
+        a->setData("tts");
+        connect(a, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
+        actions_["tts"] = a;
+    }
+
+    // --- 视图 (&V) ---
+    QMenu* m_view = mb->addMenu("视图(&V)");
+    {
+        QAction* a = m_view->addAction("显示日志面板");
+        a->setShortcut(QKeySequence("Ctrl+Shift+L"));
+        a->setCheckable(true);
+        a->setChecked(cfg_.show_log_dock);
+        a->setData("toggle_log");
+        connect(a, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
+        actions_["toggle_log"] = a;
+    }
+    // 2026-09-02: 主题改成 submenu 4 选 1 (单选 QActionGroup)
+    {
+        QMenu* m_theme = m_view->addMenu("主题(&T)");
+        QActionGroup* group = new QActionGroup(this);
+        group->setExclusive(true);
+        AbTheme::Kind cur = AbTheme::current();
+        for (int k = 0; k < AbTheme::NumThemes; ++k) {
+            QAction* a = m_theme->addAction(AbTheme::displayName(k));
+            a->setCheckable(true);
+            a->setChecked(k == cur);
+            a->setData(QString("theme:%1").arg(AbTheme::shortName(k)));
+            connect(a, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
+            group->addAction(a);
+            actions_[QString("theme:%1").arg(AbTheme::shortName(k))] = a;
+        }
+    }
+
+    // --- 帮助 (&H) ---
+    QMenu* m_help = mb->addMenu("帮助(&H)");
+    {
+        QAction* a = m_help->addAction("关于 ab...");
+        a->setData("about");
+        connect(a, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
+        actions_["about"] = a;
+    }
+}
+
+// 2026-09-02: 框架内置通用工具栏 (跑选中/跑 Auto/停止 - 所有 task runner 通用)
+void AbMainWindow::buildBuiltInToolbar() {
+    QToolBar* tb = addToolBar("主工具栏");
+    tb->setObjectName("AbMainToolBar");
+    tb->setMovable(true);
+    tb->setFloatable(true);
+
+    auto add = [&](const QString& label, const QString& id, const QString& tip, const QString& sc = QString()) {
+        QAction* a = tb->addAction(label);
+        if (!tip.isEmpty())   a->setToolTip(tip);
+        if (!sc.isEmpty())    a->setShortcut(QKeySequence(sc));
+        a->setData(id);
+        connect(a, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
+        actions_[id] = a;
+    };
+
+    add("▶", "run_selected", "跑选中任务 (F5)", "F5");
+    add("⚡", "run_auto",     "跑 Auto 链 (F6)", "F6");
+    add("■", "stop",         "停止当前 task (F7)", "F7");
+}
+
+// 2026-09-02: 框架内置通用按钮 (编译并启动 / 启动 cloud_main / 停止)
+//   仅当 ai_build.json 配置了 run_after_build.binary_path 时才加
+void AbMainWindow::buildBuiltInButtons() {
+    if (cfg_.run_after_build.binary_path.isEmpty()) return;
+    QWidget* cw = centralWidget();
+    if (!cw) return;
+    QVBoxLayout* vl = qobject_cast<QVBoxLayout*>(cw->layout());
+    if (!vl) return;
+
+    QHBoxLayout* row = new QHBoxLayout();
+    auto addBtn = [&](const QString& label, const QString& id, const QString& tip, const QString& color, bool enabled) {
+        QPushButton* btn = new QPushButton(label, this);
+        btn->setToolTip(tip);
+        if (!color.isEmpty()) btn->setProperty("role", color);
+        btn->setEnabled(enabled);
+        btn->setProperty("abId", id);
+        connect(btn, &QPushButton::clicked, this, &AbMainWindow::onActionTriggered);
+        row->addWidget(btn);
+        buttons_[id] = btn;
+    };
+
+    QString binary_name = QFileInfo(cfg_.run_after_build.binary_path).fileName();
+    QString btn_label = cfg_.run_after_build.button_label.isEmpty()
+                        ? QString("🚀 启动 %1").arg(binary_name)
+                        : cfg_.run_after_build.button_label;
+    addBtn(QString("⚡ 编译并启动"), "build_and_run",
+           "编译 + 启动 " + binary_name, "primary", true);
+    addBtn(btn_label, "run_cloud",
+           "启动已编译的 " + binary_name, "success", !cloud_binary_.isEmpty());
+    addBtn("■ 停止", "stop", "停止当前 task", "danger", false);
+
+    row->addStretch(1);
+    vl->addLayout(row);
 }
 
 void AbMainWindow::buildTaskList() {
@@ -250,6 +406,16 @@ void AbMainWindow::onActionTriggered() {
     if (id == "run_cloud")    { onRunCloud(); return; }
     if (id == "build_and_run"){ onBuildAndRun(); return; }
     if (id == "toggle_theme") { onToggleTheme(); return; }
+    // 2026-09-02: theme:dark/light/solarized/nord
+    if (id.startsWith("theme:")) {
+        QString name = id.mid(6);  // "dark" / "light" / "solarized" / "nord"
+        AbTheme::Kind k = AbTheme::parse(name);
+        AbTheme::apply(static_cast<int>(k));
+        cfg_.theme = name;  // 同步到配置
+        if (sb_right_) sb_right_->setText(QString("Qt=%1 | 主题=%2").arg(qApp ? "Qt5/6" : "?", name));
+        log("ok", QString("主题切换: %1").arg(AbTheme::displayName(static_cast<int>(k))));
+        return;
+    }
     if (id == "toggle_log")   {
         if (log_dock_) log_dock_->setVisible(!log_dock_->isVisible());
         return;
@@ -289,6 +455,16 @@ void AbMainWindow::onActionTriggered() {
         QProcess::startDetached(bak_binary_, QStringList() << cfg_.cwd);
         return;
     }
+    if (id == "proxy_test") {
+        // 调 ac ght-cli --proxy-test, 检测 GitHub API 代理是否通
+        if (ac_binary_.isEmpty()) {
+            log("err", "✗ ac 未找到, 没法跑代理测试");
+            return;
+        }
+        log("info", QString("→ 调 %1 ght-cli --proxy-test").arg(ac_binary_));
+        QProcess::startDetached(ac_binary_, QStringList() << "ght-cli" << "--proxy-test", QDir::homePath());
+        return;
+    }
     if (id == "diag") { runTaskByName("diag"); return; }
     if (id == "view-log") { runTaskByName("view-log"); return; }
     if (id == "build+deploy") { runTaskByName("build+deploy"); return; }
@@ -306,6 +482,17 @@ void AbMainWindow::onActionTriggered() {
             if (!b.task.isEmpty()) runTaskByName(b.task);
             else if (!b.cmd.isEmpty()) runCmd(b.cmd, id);
             return;
+        }
+    }
+    // 2026-09-02: menus 也支持 task/cmd 字段
+    for (const auto& md : cfg_.menus) {
+        for (const auto& mi : md.items) {
+            if (mi.id == id) {
+                if (!mi.task.isEmpty()) runTaskByName(mi.task);
+                else if (!mi.cmd.isEmpty()) runCmd(mi.cmd, id);
+                else log("warn", QString("菜单项 %1 没有 task/cmd").arg(id));
+                return;
+            }
         }
     }
     log("warn", QString("未定义的动作: %1").arg(id));

@@ -61,8 +61,21 @@ endif()
 # 安装
 install(TARGETS ab RUNTIME DESTINATION bin)
 
-# 复制 QSS 到 build 目录
-configure_file(${CMAKE_SOURCE_DIR}/ui/ab_dark.qss
-               ${CMAKE_BINARY_DIR}/ab_dark.qss COPYONLY)
-configure_file(${CMAKE_SOURCE_DIR}/ui/ab_light.qss
-               ${CMAKE_BINARY_DIR}/ab_light.qss COPYONLY)
+# 复制 QSS 到 build 目录 (2026-09-02: 用 EXISTS 守卫, QSS 文件可选)
+# 实际 QSS 内嵌在 AbTheme.cpp, 这里只是给想覆盖默认配色的用户用的扩展点
+if(EXISTS ${CMAKE_SOURCE_DIR}/ui/ab_dark.qss)
+    configure_file(${CMAKE_SOURCE_DIR}/ui/ab_dark.qss
+                   ${CMAKE_BINARY_DIR}/ab_dark.qss COPYONLY)
+endif()
+if(EXISTS ${CMAKE_SOURCE_DIR}/ui/ab_light.qss)
+    configure_file(${CMAKE_SOURCE_DIR}/ui/ab_light.qss
+                   ${CMAKE_BINARY_DIR}/ab_light.qss COPYONLY)
+endif()
+if(EXISTS ${CMAKE_SOURCE_DIR}/ui/ab_solarized.qss)
+    configure_file(${CMAKE_SOURCE_DIR}/ui/ab_solarized.qss
+                   ${CMAKE_BINARY_DIR}/ab_solarized.qss COPYONLY)
+endif()
+if(EXISTS ${CMAKE_SOURCE_DIR}/ui/ab_nord.qss)
+    configure_file(${CMAKE_SOURCE_DIR}/ui/ab_nord.qss
+                   ${CMAKE_BINARY_DIR}/ab_nord.qss COPYONLY)
+endif()
