@@ -132,6 +132,7 @@ AbConfig AbConfig::load(const QString& path) {
         QJsonObject rab = ui["run_after_build"].toObject();
         if (!rab.isEmpty()) {
             cfg.run_after_build.binary_path = rab["binary_path"].toString();
+            cfg.run_after_build.cwd         = rab["cwd"].toString();  // 2026-09-02 加: 子进程独立 cwd (空 → cfg_.cwd)
             cfg.run_after_build.auto_run    = rab["auto_run"].toBool(false);
             cfg.run_after_build.button_label = rab["button_label"].toString("🚀 启动");
             cfg.run_after_build.on_success_task = rab["on_success_task"].toString();

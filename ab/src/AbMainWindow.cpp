@@ -718,11 +718,16 @@ void AbMainWindow::onRunCloud() {
     // 早期版本用 p->start + waitForFinished(-1) 会卡住 GUI, 而且 cloud_main 退出时
     // 才记一条 rc, 中间用户看不到任何 stderr. 这里改成 detached, 立刻 rc=0 表示启动成功.
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    // 1) 默认 vulkan ICD (nvidia 真机)
-    env.insert("VK_ICD_FILENAMES", "/usr/share/vulkan/icd.d/nvidia_icd.json");
-    // 2) ai_build.json 里 run_after_build.env 全量注入 + $VAR 展开 (2026-09-02 修)
-    //    之前只塞 VK_ICD_FILENAMES, 漏了 BVWS_EMBED/BVWS_FORCE_PROJECT/LD_LIBRARY_PATH 等,
-    //    cloud_main 3D 区域空白 ([bvws_read_viewport] FAIL: no RenderingDevice)
+    // 2026-09-02 FIX v9.0: 跟 ui.py cmd_launch_cloud_main 完全一致启动链
+    //   之前 ab 在 onRunCloud 里硬塞 VK_ICD_FILENAMES=nvidia_icd.json + SDL_VIDEODRIVER=wayland,
+    //   ui.py 完全没塞这两个. 同样的 binary + lib + tscn, 两边行为却不一样, 真因就是
+    //   ab 多塞了 env, 跟 godot_vulkan.md 规则的"不要硬塞, 走系统默认"违背.
+    //   修法:
+    //     - 删 VK_ICD_FILENAMES 默认值 (交给系统 default ICD)
+    //     - 删 SDL_VIDEODRIVER 默认值 (走 $DISPLAY/$WAYLAND_DISPLAY)
+    //     - env 完全从 cfg_.run_after_build.env 读, 不加料
+    //   ai_build.json 现在跟 ui.py 一样只设 6 个 env: BVWS_EMBED / BVWS_FORCE_PROJECT /
+    //   RENDER_MODE / ROS_DISTRO / LD_LIBRARY_PATH (含 $VAR 展开) / SDL_AUDIODRIVER.
     for (auto it = cfg_.run_after_build.env.constBegin();
          it != cfg_.run_after_build.env.constEnd(); ++it) {
         QString val = it.value();
@@ -742,20 +747,21 @@ void AbMainWindow::onRunCloud() {
         expanded += val.mid(offset);
         env.insert(it.key(), expanded);
     }
-    // 3) 默认 wayland 渲染 (跟 godot_vulkan.md 规则一致, 用户本地 wayland + NVIDIA)
-    if (env.value("SDL_VIDEODRIVER").isEmpty()) {
-        env.insert("SDL_VIDEODRIVER", "wayland");
-    }
-    // 4) Qt5 QProcess::startDetached 没有 (program, args, env, cwd, pid) 5参 overload,
-    //    只能继承父进程 env. 用 qputenv 把 env 全量塞到父进程, fork 时子进程继承.
-    //    注意: 这会污染 ab 自身进程的 env, 启动 cloud_main 后 ab 也有这些 env.
-    //    副作用: 不影响 ab GUI 功能 (已经启动完了).
-    log("info", QString("  env: 注入 %1 个变量").arg(env.keys().size()));
+    // Qt5 QProcess::startDetached 没有 (program, args, env, cwd, pid) 5参 overload,
+    // 只能继承父进程 env. 用 qputenv 把 env 全量塞到父进程, fork 时子进程继承.
+    // 注意: 这会污染 ab 自身进程的 env, 启动 cloud_main 后 ab 也有这些 env.
+    // 副作用: 不影响 ab GUI 功能 (已经启动完了).
+    log("info", QString("  env: 注入 %1 个变量 (从 cfg_.run_after_build.env)").arg(env.keys().size()));
     for (const QString& k : env.keys()) {
         qputenv(k.toUtf8().constData(), env.value(k).toUtf8());
     }
+    // 2026-09-02: run_after_build.cwd 优先于 cfg_.cwd
+    //   ui.py 启 cloud_main 用 bin/Debug 作 cwd (dlopen ./libworkspace_v7.so 时相对路径解析正确).
+    //   之前 ab GUI 用 cfg_.cwd = 项目根, 导致 cloud_main 找不到 sidecar, 3D 区域空白.
+    QString child_cwd = cfg_.run_after_build.cwd.isEmpty() ? cfg_.cwd : cfg_.run_after_build.cwd;
+    log("info", QString("  cwd: %1").arg(child_cwd));
     qint64 pid = 0;
-    bool ok = QProcess::startDetached(cloud_binary_, args, cfg_.cwd, &pid);
+    bool ok = QProcess::startDetached(cloud_binary_, args, child_cwd, &pid);
     if (ok) {
         log("ok", QString("✓ %1 已在后台启动, pid=%2").arg(QFileInfo(cloud_binary_).fileName()).arg(pid));
         log("info", QString("  stdout/stderr 直接进自己的终端/日志文件, 不进 ab 日志 dock"));

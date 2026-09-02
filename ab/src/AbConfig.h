@@ -59,6 +59,7 @@ struct AbMenuDef {
 
 struct AbRunAfterBuild {
     QString binary_path;  // e.g. "bin/Debug/cloud_main"
+    QString cwd;          // e.g. "/.../bin/Debug" — 子进程 cwd (空则用 cfg_.cwd)
     QStringList args;     // e.g. ["--rendering-driver","vulkan",...]
     QMap<QString, QString> env;  // 注入到子进程, 支持 $VAR 展开
     bool auto_run = false;  // 编译成功后自动跑 (false=只启用按钮)
