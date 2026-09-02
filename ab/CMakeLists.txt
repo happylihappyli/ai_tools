@@ -31,6 +31,7 @@ set(AB_SOURCES
     src/AbTheme.cpp
     src/AbTaskRunner.cpp
     src/AbLogDock.cpp
+    src/AbTaskInspector.cpp
     src/AbJson.cpp
 )
 
@@ -40,6 +41,7 @@ set(AB_HEADERS
     src/AbTheme.h
     src/AbTaskRunner.h
     src/AbLogDock.h
+    src/AbTaskInspector.h
     src/AbJson.h
 )
 

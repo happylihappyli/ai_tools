@@ -31,6 +31,7 @@ namespace ab {
 
 class AbTaskRunner;
 class AbLogDock;
+class AbTaskInspector;
 
 class AbMainWindow : public QMainWindow {
     Q_OBJECT
@@ -89,6 +90,7 @@ private:
     AbConfig cfg_;
     AbTaskRunner* runner_ = nullptr;
     AbLogDock*    log_dock_ = nullptr;
+    AbTaskInspector* inspector_ = nullptr;  // 2026-09-02: 任务/进程检查器 dock
 
     // UI
     QTreeWidget*   task_list_  = nullptr;

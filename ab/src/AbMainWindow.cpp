@@ -3,6 +3,7 @@
 #include "AbTaskRunner.h"
 #include "AbLogDock.h"
 #include "AbTheme.h"
+#include "AbTaskInspector.h"  // 2026-09-02: 任务/进程检查器 dock
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -99,6 +100,13 @@ void AbMainWindow::buildFromConfig() {
         log_dock_ = new AbLogDock(this);
         addDockWidget(Qt::BottomDockWidgetArea, log_dock_);
     }
+    // 2026-09-02: 任务/进程检查器 dock (放右侧, 默认显示)
+    inspector_ = new AbTaskInspector(this);
+    inspector_->setConfig(cfg_);
+    inspector_->setCwd(cfg_.cwd);
+    addDockWidget(Qt::RightDockWidgetArea, inspector_);
+    // tabify 在 log dock 旁边
+    if (log_dock_) tabifyDockWidget(log_dock_, inspector_);
 }
 
 // 2026-09-02: 框架内置通用菜单 (所有调试程序都需要)
@@ -170,6 +178,16 @@ void AbMainWindow::buildBuiltInMenus() {
         a->setData("toggle_log");
         connect(a, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
         actions_["toggle_log"] = a;
+    }
+    {
+        // 2026-09-02: 任务检查器 (任务状态 + 进程)
+        QAction* a = m_view->addAction("任务检查器");
+        a->setShortcut(QKeySequence("Ctrl+I"));
+        a->setCheckable(true);
+        a->setChecked(true);
+        a->setData("toggle_inspector");
+        connect(a, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
+        actions_["toggle_inspector"] = a;
     }
     // 2026-09-02: 主题改成 submenu 4 选 1 (单选 QActionGroup)
     {
@@ -420,6 +438,10 @@ void AbMainWindow::onActionTriggered() {
         if (log_dock_) log_dock_->setVisible(!log_dock_->isVisible());
         return;
     }
+    if (id == "toggle_inspector") {
+        if (inspector_) inspector_->setVisible(!inspector_->isVisible());
+        return;
+    }
     if (id == "about")        { onAbout(); return; }
     if (id == "quit")         { onQuit(); return; }
     if (id == "open_ght")     {
@@ -552,6 +574,7 @@ void AbMainWindow::runTaskByName(const QString& name, std::function<void()> on_d
     current_on_done_ = on_done;
     prog_label_->setText(QString("当前: %1").arg(name));
     prog_bar_->setVisible(true);
+    if (inspector_) inspector_->onTaskStarted(name);
     if (auto a = actions_.value("run_selected")) a->setEnabled(false);
     if (auto a = actions_.value("run_auto"))    a->setEnabled(false);
     if (auto a = actions_.value("stop"))        a->setEnabled(true);
@@ -597,6 +620,7 @@ void AbMainWindow::onFinished(const QString& task_name, int exit_code, double el
         QString("[%1] 退出码 %2  耗时 %.1fs").arg(task_name).arg(exit_code).arg(elapsed));
     prog_label_->setText(QString("当前: — (上次: %1, rc=%2, %.1fs)").arg(task_name).arg(exit_code).arg(elapsed));
     prog_bar_->setVisible(false);
+    if (inspector_) inspector_->onTaskFinished(task_name, exit_code, elapsed);
     if (auto a = actions_.value("run_selected")) a->setEnabled(true);
     if (auto a = actions_.value("run_auto"))    a->setEnabled(true);
     if (auto a = actions_.value("stop"))        a->setEnabled(false);
