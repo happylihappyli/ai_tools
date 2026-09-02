@@ -70,6 +70,9 @@ private:
     void wireRunner();
     void enableRunCloudButton(bool en);
     QString findRunBinary() const;
+    // 找系统工具的绝对路径 (which-like), 找不到返回 ""
+    // 搜索顺序: PATH -> ~/.local/bin -> /usr/local/bin -> /usr/bin
+    QString findTool(const QString& name) const;
     void runTaskByName(const QString& name, std::function<void()> on_done = nullptr);  // 通用跑 task
     void runCmd(const QString& cmd, const QString& task_name = "<cmd>");
     void log(const QString& level, const QString& msg);
@@ -97,6 +100,9 @@ private:
     QString current_task_;
     std::function<void()> current_on_done_;
     QString cloud_binary_;  // 找到的 cloud_main 路径
+    QString ac_binary_;     // 找到的 ac 绝对路径 (启动时探测, 解决桌面 GUI PATH 不带 ~/.local/bin 问题)
+    QString spd_say_binary_;
+    QString bak_binary_;
 
     // 动作注册 (id → QAction*)
     QHash<QString, QAction*> actions_;

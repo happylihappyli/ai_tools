@@ -74,13 +74,60 @@ class TokenStatus:
     repos: dict = field(default_factory=dict)  # owner/repo -> {permissions, private, accessible}
 
 
+# === 代理支持 (公司网络/github 走代理) ===
+# 优先级: GHT_PROXY env > HTTPS_PROXY > HTTP_PROXY > ALL_PROXY > git config http.proxy
+# 显式设: --proxy <URL> (CLI), 禁用: --no-proxy
+
+# 模块级 flag: --no-proxy 时设 True, get_proxy() 直接返回 ''
+_PROXY_DISABLED = False
+
+
+def get_proxy() -> str:
+    """自动探测代理 URL. 返回 '' 表示直连.
+    优先级:
+        1. GHT_PROXY (工具特定, 推荐)
+        2. HTTPS_PROXY / https_proxy
+        3. HTTP_PROXY / http_proxy
+        4. ALL_PROXY / all_proxy
+        5. git config --get http.proxy (global + local)
+    """
+    if _PROXY_DISABLED:
+        return ""
+    for var in ("GHT_PROXY", "HTTPS_PROXY", "https_proxy",
+                "HTTP_PROXY", "http_proxy",
+                "ALL_PROXY", "all_proxy"):
+        v = os.environ.get(var, "").strip()
+        if v:
+            return v
+    # git config (git push 也靠这个, 一致性)
+    try:
+        for scope in ("--global", "--local"):
+            out = subprocess.run(
+                ["git", "config", scope, "http.proxy"],
+                capture_output=True, text=True, timeout=3,
+            )
+            if out.returncode == 0 and out.stdout.strip():
+                return out.stdout.strip()
+    except Exception:
+        pass
+    return ""
+
+
 def curl_json(url: str, token: str = "", method: str = "GET",
-              data: str = "") -> tuple[int, dict | str]:
-    """用 curl 调 GitHub API. 返回 (http_code, body_json_or_text)."""
+              data: str = "", proxy: str = "") -> tuple[int, dict | str]:
+    """用 curl 调 GitHub API. 返回 (http_code, body_json_or_text).
+    proxy: 显式代理 URL, ''=自动探测, 'no'=强制直连.
+    """
+    if proxy == "no":
+        proxy = ""
+    elif proxy == "":
+        proxy = get_proxy()
     cmd = ["curl", "-sS", "-X", method, "-w", "\n%{http_code}",
            "-H", "Accept: application/vnd.github+json",
            "-H", "X-GitHub-Api-Version: 2022-11-28",
            "-H", "User-Agent: ai_tools-github_token-tool"]
+    if proxy:
+        cmd += ["-x", proxy]
     if token:
         cmd += ["-H", f"Authorization: token {token}"]
     if data:
@@ -100,9 +147,32 @@ def curl_json(url: str, token: str = "", method: str = "GET",
         except Exception:
             return code, body
     except subprocess.TimeoutExpired:
-        return 0, "timeout"
+        return 0, f"timeout (proxy={proxy or '直连'})"
     except Exception as e:
-        return 0, str(e)
+        return 0, f"{type(e).__name__}: {e} (proxy={proxy or '直连'})"
+
+
+def test_proxy_reachable(proxy: str = "", timeout: int = 5) -> tuple[bool, str]:
+    """测试代理是否能访问 api.github.com. 返回 (ok, info)."""
+    if proxy == "":
+        proxy = get_proxy()
+    if not proxy:
+        return True, "未设代理, 直连测试"
+    cmd = ["curl", "-sS", "-I", "-x", proxy, "--max-time", str(timeout),
+           "https://api.github.com/user"]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 2)
+        # 任何 HTTP 响应 (401, 200) 都算通; 真正失败是 000 / connect refused
+        if out.returncode == 0 and ("HTTP/" in out.stdout or "HTTP/" in out.stderr):
+            # 提取 status line
+            for ln in (out.stdout + out.stderr).splitlines():
+                if ln.startswith("HTTP/"):
+                    return True, f"✓ 代理通 ({ln.strip()}, proxy={proxy})"
+        return False, f"✗ 代理无响应 (rc={out.returncode}, proxy={proxy})"
+    except subprocess.TimeoutExpired:
+        return False, f"✗ 代理超时 (>{timeout}s, proxy={proxy})"
+    except Exception as e:
+        return False, f"✗ 代理异常: {type(e).__name__}: {e}"
 
 
 def find_token_from_credentials() -> tuple[str, str]:
@@ -172,13 +242,15 @@ def check_token(token: str) -> TokenStatus:
     else:
         st.error = f"未知错误 HTTP {code}: {str(body)[:200]}"
     # rate limit
-    code2, _ = curl_json(f"{GITHUB_API}/rate_limit", token)
+    proxy = get_proxy()  # 跟前面 /user 用同一个代理
+    code2, _ = curl_json(f"{GITHUB_API}/rate_limit", token, proxy=proxy)
     if code2 == 200:
-        rc, _ = curl_json(f"{GITHUB_API}/rate_limit", token)
         # 再拿一次拿 header 信息 (body 里有 rate info)
         try:
-            cmd = ["curl", "-sS", "-I", "-H", f"Authorization: token {token}",
-                   f"{GITHUB_API}/rate_limit"]
+            cmd = ["curl", "-sS", "-I", "-H", f"Authorization: token {token}"]
+            if proxy:
+                cmd += ["-x", proxy]
+            cmd.append(f"{GITHUB_API}/rate_limit")
             out = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
             for ln in out.stdout.splitlines():
                 if "x-ratelimit-remaining:" in ln.lower():
@@ -407,6 +479,18 @@ def do_diagnose(verbose: bool = True) -> int:
     return 0 if st.valid else 1
 
 
+def do_proxy_test() -> int:
+    """CLI: 测试代理连通性."""
+    proxy = get_proxy()
+    if proxy:
+        print(f"代理: {proxy}")
+    else:
+        print("代理: (未设, 走直连)")
+    ok, info = test_proxy_reachable(proxy)
+    print(info)
+    return 0 if ok else 1
+
+
 def main() -> int:
     p = argparse.ArgumentParser(
         prog="github-token",
@@ -423,7 +507,16 @@ def main() -> int:
     p.add_argument("--info", action="store_true", help="显示 token 来源 / 状态")
     p.add_argument("--dry", action="store_true", help="配合 --set/--clear, 只显示不真做")
     p.add_argument("-q", "--quiet", action="store_true", help="静默模式")
+    p.add_argument("--proxy", metavar="URL", help="显式设代理 (例: http://127.0.0.1:7890)")
+    p.add_argument("--no-proxy", action="store_true", help="禁用代理 (强制直连)")
+    p.add_argument("--proxy-test", action="store_true", help="测试代理是否能访问 api.github.com")
     args = p.parse_args()
+
+    if args.no_proxy:
+        global _PROXY_DISABLED
+        _PROXY_DISABLED = True
+    elif args.proxy:
+        os.environ["GHT_PROXY"] = args.proxy
 
     if args.url:
         print(f"Fine-grained (推荐): {SETUP_URLS['fine-grained']}")
@@ -432,6 +525,8 @@ def main() -> int:
     if args.setup:
         print(get_setup_instructions())
         return 0
+    if args.proxy_test:
+        return do_proxy_test()
     if args.set:
         return set_token(args.set, dry=args.dry)
     if args.clear:

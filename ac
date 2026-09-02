@@ -40,12 +40,16 @@ import os
 import sys
 import json
 import subprocess
+import threading
 from pathlib import Path
 
 # 自动定位 ai_tools 目录 (这个脚本旁边)
 GT_DIR = Path(__file__).resolve().parent
 COMPILE_TOOL = GT_DIR / "compile_tool.py"
-CPP_PANEL = GT_DIR / "cpp_panel" / "ai_panel"
+# 2026-09-01 切换: 优先用 ab_launcher (新的 C++ Qt ab 工具, 带源码变化检测)
+# 兜底用老 cpp_panel/ai_panel 兼容旧版
+AB_LAUNCHER  = GT_DIR / "ab_launcher"
+CPP_PANEL    = GT_DIR / "cpp_panel" / "ai_panel"
 TTS_TOOL = GT_DIR / "tts"
 BAK_TOOL = GT_DIR / "bak"
 GHT_TOOL = GT_DIR / "github_token"
@@ -202,7 +206,11 @@ def main() -> int:
     # --task, --preset, --offscreen 现在默认也走 GUI 模式以避免阻塞，除非同时指定了 --cli。
     use_cli = "--cli" in args
 
-    if CPP_PANEL.exists() and not use_cli:
+    # 优先用 ab_launcher (新的 C++ Qt ab, 带源码检测), 兜底老 cpp_panel/ai_panel
+    if AB_LAUNCHER.exists() and not use_cli:
+        # ab_launcher 是 shell 脚本, 不能直接 exec; 通过 sh 调用
+        cmd = ["/bin/sh", str(AB_LAUNCHER)] + filter_args(args, ["--offscreen", "--cli"])
+    elif CPP_PANEL.exists() and not use_cli:
         # C++ 版本不认识 --offscreen 和 --cli
         cmd = [str(CPP_PANEL)] + filter_args(args, ["--offscreen", "--cli"])
     elif COMPILE_TOOL.exists():
@@ -233,11 +241,40 @@ def main() -> int:
             return rc
         else:
             # GUI 模式: 异步启动，不阻塞终端，符合用户"不要让我点击"和"GUI 启动"的规则
-            # 2026-08-29: 使用 start_new_session=True 彻底分离进程，避免 ac 退出导致 GUI 挂掉
-            subprocess.Popen(cmd, env=env, start_new_session=True,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            print(f"🚀 AI Compile GUI 启动中... (后端: {'compile_tool.py' if COMPILE_TOOL.exists() else 'ai_panel'})")
-            print(f"💡 命令已透传，GUI 将自动开始执行。")
+            # 2026-09-01 改: 不用 DEVNULL (吞掉所有输出, 用户不知道发生了什么)
+            # 改成写到 /tmp/ac_gui_<pid>.log, 启动后告诉用户 log 路径, 5s 后 tail 一次
+            import time
+            log_path = f"/tmp/ac_gui_{os.getpid()}_{int(time.time())}.log"
+            log_fh = open(log_path, "w")
+            proc = subprocess.Popen(cmd, env=env, start_new_session=True,
+                                    stdout=log_fh, stderr=subprocess.STDOUT)
+            log_fh.close()  # 父进程关掉, 子进程仍持有 fd
+            if AB_LAUNCHER.exists() and not use_cli:
+                backend = "ab (C++ Qt, 新)"
+            elif CPP_PANEL.exists() and not use_cli:
+                backend = "ai_panel (C++, 老)"
+            else:
+                backend = "compile_tool.py (Python)"
+            print(f"🚀 AI Compile GUI 启动中... (后端: {backend})")
+            print(f"   pid={proc.pid}  日志: {log_path}")
+            print(f"💡 窗口应在 1-3 秒内弹出. 没弹就看日志:  tail -f {log_path}")
+            # 5 秒后探一次, 还在跑说明 GUI 启动了; 退出说明崩了, 帮用户 tail 日志
+            def _probe_gui():
+                rc = proc.poll()
+                if rc is not None:
+                    print(f"✗ GUI 进程已退出 rc={rc}, 日志 tail:")
+                    try:
+                        with open(log_path) as f:
+                            lines = f.readlines()
+                        for ln in lines[-15:]:
+                            print(f"   {ln.rstrip()}")
+                    except Exception:
+                        pass
+                else:
+                    print(f"✓ GUI 进程仍在跑 (pid={proc.pid})")
+            t = threading.Timer(5.0, _probe_gui)
+            t.daemon = True
+            t.start()
             return 0
     except KeyboardInterrupt:
         return 130

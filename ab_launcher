@@ -3,15 +3,42 @@
 #
 # ab — AI Build 编译/调试 GUI (C++ Qt5/6)
 # 启动 ab 二进制, 自动处理 QT_QPA_PLATFORM (无显示 → offscreen)
+# 自动检测源码变化, 强制重新编译 (避免 cmake incremental 漏检)
 
 SELF="$(readlink -f "$0")"
 SELF_DIR="$(dirname "$SELF")"
 AB_BIN="$SELF_DIR/ab/build/ab"
+AB_DIR="$SELF_DIR/ab"
 
+# 1. 二进制不存在 → 构建
+# 2. 二进制存在但源码比二进制新 → 重新构建 (scanner 算法)
+need_build=0
 if [ ! -x "$AB_BIN" ]; then
-    # build 目录不存在, 尝试 cmake 构建
     echo "ab 未编译, 自动 cmake 构建..."
-    cd "$SELF_DIR/ab" && mkdir -p build && cd build && cmake .. && make -j4
+    need_build=1
+else
+    # 比较二进制和 src/ 目录下所有文件的时间戳
+    bin_mtime=$(stat -c %Y "$AB_BIN" 2>/dev/null || echo 0)
+    newest_src_mtime=0
+    for f in $(find "$AB_DIR/src" -type f \( -name "*.cpp" -o -name "*.h" \)); do
+        m=$(stat -c %Y "$f" 2>/dev/null || echo 0)
+        if [ "$m" -gt "$newest_src_mtime" ]; then
+            newest_src_mtime=$m
+        fi
+    done
+    # 也检查 CMakeLists.txt
+    m=$(stat -c %Y "$AB_DIR/CMakeLists.txt" 2>/dev/null || echo 0)
+    if [ "$m" -gt "$newest_src_mtime" ]; then
+        newest_src_mtime=$m
+    fi
+    if [ "$newest_src_mtime" -gt "$bin_mtime" ]; then
+        echo "ab 源码比二进制新 ($newest_src_mtime > $bin_mtime), 重新构建..."
+        need_build=1
+    fi
+fi
+
+if [ "$need_build" = "1" ]; then
+    cd "$AB_DIR" && mkdir -p build && cd build && cmake .. >/dev/null && make -j4
     if [ ! -x "$AB_BIN" ]; then
         echo "✗ ab 编译失败" >&2
         exit 1

@@ -505,6 +505,15 @@ class TokenDialog(QMainWindow):
         # 启动日志
         self._log("info", f"{APP_NAME} v{APP_VERSION} 启动 (Qt={QT_BACKEND})")
 
+        # 显示当前代理状态
+        cur_proxy = gt.get_proxy()
+        if cur_proxy:
+            self._log("info", f"检测到代理: {cur_proxy}")
+            self._detail_label.setText(f"代理: {cur_proxy}  (按 Ctrl+P 测试连通性)")
+        else:
+            self._log("warn", "未检测到代理, 若 github 访问失败请 Ctrl+P 设置代理")
+            self._detail_label.setText("未检测到代理  (按 Ctrl+P 测试 / 提示设置代理)")
+
         # 自动诊断
         if auto_check:
             QTimer.singleShot(150, self.on_diagnose)
@@ -517,6 +526,14 @@ class TokenDialog(QMainWindow):
         self.act_diagnose.setShortcut(QKeySequence("Ctrl+D"))
         self.act_diagnose.setStatusTip("跑完整诊断 (Token + 所有已知 repo)")
         self.act_diagnose.triggered.connect(self.on_diagnose)
+
+        # 代理测试 (新增, 公司网络需要)
+        self.act_proxy_test = QAction("代理测试(&P)...", self)
+        self.act_proxy_test.setShortcut(QKeySequence("Ctrl+P"))
+        self.act_proxy_test.setStatusTip(
+            "测试代理是否能访问 api.github.com (无代理会显示当前检测结果)"
+        )
+        self.act_proxy_test.triggered.connect(self.on_proxy_test)
 
         self.act_test = QAction("测试(&T)", self)
         self.act_test.setShortcut(QKeySequence("Ctrl+T"))
@@ -609,6 +626,8 @@ class TokenDialog(QMainWindow):
         m_tools = mb.addMenu("工具(&T)")
         m_tools.addAction(self.act_diagnose)
         m_tools.addAction(self.act_cli_diag)
+        m_tools.addSeparator()
+        m_tools.addAction(self.act_proxy_test)
 
         # 视图
         m_view = mb.addMenu("视图(&V)")
@@ -650,6 +669,8 @@ class TokenDialog(QMainWindow):
         tb.addAction(self.act_diagnose)
         tb.addAction(self.act_open_github)
         tb.addAction(self.act_copy_url)
+        tb.addSeparator()
+        tb.addAction(self.act_proxy_test)
         tb.addSeparator()
         tb.addAction(self.act_test)
         tb.addAction(self.act_save)
@@ -887,6 +908,46 @@ class TokenDialog(QMainWindow):
         self._log("info", "打开设置指南")
         dlg = SetupHelpDialog(self)
         dlg.exec()
+
+    def on_proxy_test(self):
+        """测试代理连通性 (无代理则提示设置)"""
+        proxy = gt.get_proxy()
+        if not proxy:
+            # 没设代理, 弹个输入框让用户填
+            text, ok = QtWidgets.QInputDialog.getText(
+                self, "设置代理",
+                "未检测到代理.\n\n请输入代理 URL (例: http://127.0.0.1:7890):\n"
+                "留空取消, 设了之后用 export GHT_PROXY 永久生效",
+                text=os.environ.get("GHT_PROXY", ""),
+            )
+            if not ok or not text.strip():
+                self._log("info", "代理测试取消")
+                return
+            proxy = text.strip()
+            # 仅本次进程内生效, 也提示用户永久方案
+            os.environ["GHT_PROXY"] = proxy
+            self._log("info", f"已临时设代理: {proxy}  (建议 export GHT_PROXY={proxy} 永久生效)")
+        self._log("info", f"测试代理连通性: {proxy}")
+        self._statusbar.show_msg("测试代理中...", "info")
+        # 异步跑, 不阻塞 UI
+        QTimer.singleShot(50, lambda: self._do_proxy_test_async(proxy))
+
+    def _do_proxy_test_async(self, proxy: str):
+        try:
+            ok, info = gt.test_proxy_reachable(proxy)
+            level = "ok" if ok else "err"
+            self._statusbar.show_msg(info, level)
+            self._log(level, info)
+            if ok:
+                self._big_status.setText(f"✓ 代理通")
+                self._big_status.setStyleSheet(f"color: {COLOR_OK};")
+            else:
+                self._big_status.setText(f"✗ 代理失败")
+                self._big_status.setStyleSheet(f"color: {COLOR_ERR};")
+            self._detail_label.setText(info)
+        except Exception as e:
+            self._statusbar.show_msg(f"代理测试异常: {e}", "err")
+            self._log("err", f"代理测试异常: {e}")
 
     def on_about(self):
         """打开关于对话框"""

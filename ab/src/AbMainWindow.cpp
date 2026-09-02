@@ -59,6 +59,19 @@ AbMainWindow::AbMainWindow(const AbConfig& cfg, QWidget* parent)
         }
     }
 
+    // 探测外部工具绝对路径 (避免桌面 GUI PATH 不带 ~/.local/bin)
+    ac_binary_     = findTool("ac");
+    spd_say_binary_ = findTool("spd-say");
+    bak_binary_    = findTool("bak");
+    if (ac_binary_.isEmpty()) {
+        log("warn", "未找到 ac 命令, 菜单 [GitHub Token 管理] 等会失败 (PATH 不全?)");
+    } else {
+        log("info", QString("ac: %1").arg(ac_binary_));
+    }
+    if (spd_say_binary_.isEmpty()) {
+        log("warn", "未找到 spd-say, TTS 播报不可用");
+    }
+
     // auto_start
     if (cfg_.auto_start) {
         QTimer::singleShot(300, this, &AbMainWindow::onRunAuto);
@@ -244,16 +257,36 @@ void AbMainWindow::onActionTriggered() {
     if (id == "about")        { onAbout(); return; }
     if (id == "quit")         { onQuit(); return; }
     if (id == "open_ght")     {
-        // 跨进程: 调 ac ght
-        QProcess::startDetached("ac", QStringList() << "ght" << "--no-check");
+        // 跨进程: 调 ac ght (用探测到的绝对路径, 避免桌面 GUI PATH 不全)
+        if (ac_binary_.isEmpty()) {
+            log("err", "✗ ac 未找到, 没法打开 Token 管理 (请装 ai_tools 并确认 ~/.local/bin 在 PATH)");
+            return;
+        }
+        log("info", QString("→ 调 %1 ght --no-check").arg(ac_binary_));
+        qint64 pid = 0;
+        if (QProcess::startDetached(ac_binary_, QStringList() << "ght" << "--no-check", QDir::homePath(), &pid)) {
+            log("ok", QString("✓ Token 管理已启动, pid=%1").arg(pid));
+        } else {
+            log("err", "✗ 启动 ac ght 失败");
+        }
         return;
     }
     if (id == "tts") {
-        QProcess::startDetached("spd-say", QStringList() << "ab 工具链就绪");
+        if (spd_say_binary_.isEmpty()) {
+            log("err", "✗ spd-say 未找到, TTS 不可用 (apt install speech-dispatcher?)");
+            return;
+        }
+        log("info", QString("→ 调 %1").arg(spd_say_binary_));
+        QProcess::startDetached(spd_say_binary_, QStringList() << "ab 工具链就绪");
         return;
     }
     if (id == "bak") {
-        QProcess::startDetached("bak", QStringList() << cfg_.cwd);
+        if (bak_binary_.isEmpty()) {
+            log("err", "✗ bak 未找到, 备份功能不可用");
+            return;
+        }
+        log("info", QString("→ 调 %1 %2").arg(bak_binary_).arg(cfg_.cwd));
+        QProcess::startDetached(bak_binary_, QStringList() << cfg_.cwd);
         return;
     }
     if (id == "diag") { runTaskByName("diag"); return; }
@@ -425,6 +458,33 @@ QString AbMainWindow::findRunBinary() const {
     return QString();
 }
 
+QString AbMainWindow::findTool(const QString& name) const {
+    // which-like: 找 name 的绝对路径. 找不到返回 ''.
+    // 1. PATH 探测
+    QByteArray path_env = qgetenv("PATH");
+    if (!path_env.isEmpty()) {
+        const QStringList dirs = QString::fromLocal8Bit(path_env).split(':', Qt::SkipEmptyParts);
+        for (const QString& d : dirs) {
+            QString cand = d + '/' + name;
+            QFileInfo fi(cand);
+            if (fi.exists() && fi.isExecutable()) return fi.absoluteFilePath();
+        }
+    }
+    // 2. 常见 PATH 兜底 (桌面 GUI 经常没有 ~/.local/bin)
+    const QString home = QDir::homePath();
+    const QStringList fallbacks = {
+        home + "/.local/bin/" + name,
+        "/usr/local/bin/" + name,
+        "/usr/bin/" + name,
+        "/bin/" + name,
+    };
+    for (const QString& cand : fallbacks) {
+        QFileInfo fi(cand);
+        if (fi.exists() && fi.isExecutable()) return fi.absoluteFilePath();
+    }
+    return QString();
+}
+
 void AbMainWindow::enableRunCloudButton(bool en) {
     if (auto a = actions_.value("run_cloud")) a->setEnabled(en);
     if (auto b = buttons_.value("run_cloud")) b->setEnabled(en);
@@ -439,18 +499,22 @@ void AbMainWindow::onRunCloud() {
             return;
         }
     }
-    log("task", QString("🚀 启动 %1").arg(QFileInfo(cloud_binary_).fileName()));
+    log("task", QString("🚀 启动 %1 (后台)").arg(QFileInfo(cloud_binary_).fileName()));
     QStringList args = cfg_.run_after_build.args;
-    QProcess* p = new QProcess(this);
-    // 用 QProcessEnvironment 而不是 setProcessEnvironment(QStringList)
+    // cloud_main 是长跑 GUI 程序, 用 startDetached 后台跑, 不阻塞 ab GUI.
+    // 早期版本用 p->start + waitForFinished(-1) 会卡住 GUI, 而且 cloud_main 退出时
+    // 才记一条 rc, 中间用户看不到任何 stderr. 这里改成 detached, 立刻 rc=0 表示启动成功.
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
     env.insert("VK_ICD_FILENAMES", "/usr/share/vulkan/icd.d/nvidia_icd.json");
-    p->setProcessEnvironment(env);
-    p->start(cloud_binary_, args);
-    p->waitForFinished(-1);
-    log(p->exitCode() == 0 ? "ok" : "err",
-        QString("cloud_main 退出 rc=%1").arg(p->exitCode()));
-    p->deleteLater();
+    qint64 pid = 0;
+    bool ok = QProcess::startDetached(cloud_binary_, args, cfg_.cwd, &pid);
+    if (ok) {
+        log("ok", QString("✓ %1 已在后台启动, pid=%2").arg(QFileInfo(cloud_binary_).fileName()).arg(pid));
+        log("info", QString("  stdout/stderr 直接进自己的终端/日志文件, 不进 ab 日志 dock"));
+        log("info", QString("  停止: kill %1  或  pkill -f %2").arg(pid).arg(QFileInfo(cloud_binary_).fileName()));
+    } else {
+        log("err", QString("✗ 启动失败: %1").arg(cloud_binary_));
+    }
 }
 
 void AbMainWindow::onBuildAndRun() {
