@@ -139,6 +139,12 @@ AbConfig AbConfig::load(const QString& path) {
             for (const auto& a : argsArr) {
                 cfg.run_after_build.args << a.toString();
             }
+            // env: { "KEY": "VALUE", ... } (2026-09-02 加, 支持 $VAR 展开, 解决 3D 空白 bug)
+            // 例: LD_LIBRARY_PATH = "$LD_LIBRARY_PATH:/extra/path" → 拼到原值
+            QJsonObject envObj = rab["env"].toObject();
+            for (const auto& key : envObj.keys()) {
+                cfg.run_after_build.env.insert(key, envObj[key].toString());
+            }
         }
     }
 

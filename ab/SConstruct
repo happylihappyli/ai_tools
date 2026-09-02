@@ -1,0 +1,178 @@
+# SPDX-License-Identifier: MIT
+#
+# SConstruct for ai_tools/ab (C++ Qt5/6 GUI)
+# 2026-09-02: 新增, 跟 CMakeLists.txt 并存, 二选一编译
+#   默认: scons -j$(nproc)    → build/ab
+#   老 cmake 路径: cd build && cmake .. && make  (仍然保留)
+#
+# 用法:
+#   scons -j$(nproc)                 # 编译, 输出 build/ab
+#   scons -j$(nproc) --clean         # 干净重建 (删 build/ 全部)
+#   scons install                    # install 到 /usr/local/bin
+#   scons --prefix=/your/prefix install
+#
+# 设计:
+#   - Qt5 (通过 pkg-config, 5.15.13 OK), Qt6 兼容
+#   - MOC: 扫 src/*.h 找 Q_OBJECT, 生成 moc_*.cpp 加入编译
+#   - 输出: build/ab (跟 cmake 一致, ab_launcher 通用)
+#   - 不依赖 cmake, 纯 scons 即可
+#
+# 跟 CMakeLists.txt 的差异:
+#   - cmake 走 AUTOMOC (扫 .h 生成 moc_*.cpp 塞到 ab_autogen)
+#   - scons 这边手工 MOC (更可控, 日志更清晰)
+
+import os
+import re
+import subprocess
+
+# ===== 1. 环境 =====
+env = Environment(ENV=os.environ, tools=['default'])
+
+# C++17
+env.Append(CXXFLAGS=['-std=c++17', '-fPIC', '-Wall', '-Wextra'])
+
+# 优化级别 (Release by default, debug 用 scons -O0 / scons debug=1)
+if not env.get('debug', False):
+    env.Append(CXXFLAGS=['-O2'])
+
+# ===== 2. Qt5 (pkg-config) =====
+QT_VERSION_MAJOR = 5  # 跟 CMakeLists.txt 一致
+# ParseConfig 在 command 返非 0 时抛 OSError (不会返 False), 所以先 try/except
+import subprocess as _sp
+_qt5 = _sp.run(['pkg-config', '--cflags', '--libs', 'Qt5Widgets', 'Qt5Core', 'Qt5Gui', 'Qt5Network'],
+               capture_output=True, text=True)
+if _qt5.returncode == 0:
+    QT_VERSION_MAJOR = 5
+    print(f"  Qt5 cflags: {_qt5.stdout.strip()[:200]}")
+else:
+    _qt6 = _sp.run(['pkg-config', '--cflags', '--libs', 'Qt6Widgets', 'Qt6Core', 'Qt6Gui', 'Qt6Network'],
+                   capture_output=True, text=True)
+    if _qt6.returncode == 0:
+        QT_VERSION_MAJOR = 6
+        print(f"  Qt6 cflags: {_qt6.stdout.strip()[:200]}")
+    else:
+        print("✗ 找不到 Qt5 或 Qt6 dev 包 (pkg-config 失败)")
+        print("  安装: sudo apt install qtbase5-dev libqt5core5a libqt5widgets5 libqt5gui5 libqt5network5")
+        Exit(1)
+
+qt5_ok = env.ParseConfig(f'pkg-config --cflags --libs Qt{QT_VERSION_MAJOR}Widgets Qt{QT_VERSION_MAJOR}Core Qt{QT_VERSION_MAJOR}Gui Qt{QT_VERSION_MAJOR}Network')
+print(f"✓ Qt{QT_VERSION_MAJOR} (pkg-config)")
+
+# MOC 工具路径
+MOC = os.popen(f'pkg-config --variable=moc_location Qt{QT_VERSION_MAJOR}Core 2>/dev/null').read().strip() or f'moc-qt{QT_VERSION_MAJOR}'
+if not os.path.exists(MOC):
+    MOC = 'moc'  # 兜底, 多数 distro moc 默认是 Qt5
+
+print(f"  MOC = {MOC}")
+
+# ===== 3. 扫 Q_OBJECT 头文件 =====
+SRC_DIR = 'src'
+AB_DIR = Dir('.').srcnode().abspath
+
+def find_qobject_headers():
+    """扫 src/*.h, 找含 Q_OBJECT 的 → 需要 MOC"""
+    headers = []
+    if not os.path.isdir(SRC_DIR):
+        return headers
+    for fn in sorted(os.listdir(SRC_DIR)):
+        if not fn.endswith('.h'):
+            continue
+        p = os.path.join(SRC_DIR, fn)
+        try:
+            with open(p, 'r', encoding='utf-8') as f:
+                content = f.read()
+        except Exception:
+            continue
+        if 'Q_OBJECT' in content:
+            headers.append(p)
+    return headers
+
+# ===== 4. 源文件 =====
+sources = []
+for fn in sorted(os.listdir(SRC_DIR)):
+    if fn.endswith('.cpp'):
+        sources.append(os.path.join(SRC_DIR, fn))
+
+# MOC 生成的 moc_*.cpp
+qobject_headers = find_qobject_headers()
+print(f"  Q_OBJECT headers: {qobject_headers}")
+MOC_GEN_DIR = 'build/moc_gen'
+if not os.path.isdir(MOC_GEN_DIR):
+    os.makedirs(MOC_GEN_DIR, exist_ok=True)
+
+moc_outputs = []
+for h in qobject_headers:
+    base = os.path.splitext(os.path.basename(h))[0]
+    moc_cpp = os.path.join(MOC_GEN_DIR, f'moc_{base}.cpp')
+    # 自定义 Builder
+    moc_cmd = f'{MOC} $SOURCE -o $TARGET'
+    moc_obj = env.Command(
+        target=moc_cpp,
+        source=h,
+        action=moc_cmd,
+    )
+    sources.append(moc_cpp)
+    moc_outputs.append(moc_cpp)
+    env.Depends(moc_obj, h)
+
+# ===== 5. 编译目标 =====
+BUILD_DIR = 'build'
+TARGET = os.path.join(BUILD_DIR, 'ab')
+
+# 包含路径
+env.Append(CPPPATH=[SRC_DIR, MOC_GEN_DIR])
+
+# 链接 Qt
+env.Append(LIBS=[
+    f'Qt{QT_VERSION_MAJOR}Core',
+    f'Qt{QT_VERSION_MAJOR}Gui',
+    f'Qt{QT_VERSION_MAJOR}Widgets',
+    f'Qt{QT_VERSION_MAJOR}Network',
+])
+
+# 编译
+print(f"  sources ({len(sources)}):")
+for s in sources:
+    print(f"    - {s}")
+print(f"  target: {TARGET}")
+
+ab_bin = env.Program(target=TARGET, source=sources)
+
+# ===== 6. clean 目标 =====
+if env.GetOption('clean'):
+    # --clean: 用户传了 --clean, 删 build/ 全部
+    import shutil
+    if os.path.isdir(BUILD_DIR):
+        print(f"  rm -rf {BUILD_DIR}/")
+        shutil.rmtree(BUILD_DIR)
+    Return()
+
+# 默认: 编译完成打印成功信息
+def print_done(target, source, env):
+    print(f"\n✓ 编译完成: {os.path.abspath(str(target[0]))}")
+    print(f"  跑 GUI: ab / ab --doctor / ac ab")
+    return None
+
+env.AddPostAction(ab_bin, print_done)
+
+# ===== 7. 安装: 建 ~/.local/bin/ab symlink (跟 ac 一样) =====
+# 2026-09-02 加, 编译后自动 ~/.local/bin/ab → build/ab, 跑 `ab` 就能用
+LOCAL_BIN = os.path.expanduser("~/.local/bin")
+SYMLINK = os.path.join(LOCAL_BIN, "ab")
+TARGET_ABS = os.path.abspath(str(ab_bin[0]))  # build/ab 绝对路径
+
+def install_symlink(target, source, env):
+    os.makedirs(LOCAL_BIN, exist_ok=True)
+    # 已存在但指向别处, 删掉重建
+    if os.path.islink(SYMLINK) or os.path.exists(SYMLINK):
+        cur_target = os.readlink(SYMLINK) if os.path.islink(SYMLINK) else None
+        if cur_target == TARGET_ABS:
+            print(f"  ✓ symlink 已存在: {SYMLINK} → {TARGET_ABS}")
+            return None
+        os.remove(SYMLINK)
+    os.symlink(TARGET_ABS, SYMLINK)
+    print(f"  ✓ 建 symlink: {SYMLINK} → {TARGET_ABS}")
+    print(f"  跑: ab   (任何目录) 或  ab /path/to/project")
+    return None
+
+env.AddPostAction(ab_bin, install_symlink)

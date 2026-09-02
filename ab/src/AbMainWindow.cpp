@@ -25,9 +25,11 @@
 #include <QTimer>
 #include <QMessageBox>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QStandardPaths>
 #include <QApplication>
 #include <QDebug>
+#include <QRegularExpression>
 #include <unistd.h>
 #include <cstdlib>
 
@@ -491,7 +493,7 @@ void AbMainWindow::onActionTriggered() {
     if (id == "view-log") { runTaskByName("view-log"); return; }
     if (id == "build+deploy") { runTaskByName("build+deploy"); return; }
 
-    // 通用: 找 button/toolbar 定义, 按 task / cmd 跑
+    // 通用: 找 button/toolbar/menu 定义, 按 task / cmd 跑
     for (const auto& b : cfg_.toolbar) {
         if (b.id == id) {
             if (!b.task.isEmpty()) runTaskByName(b.task);
@@ -661,7 +663,7 @@ QString AbMainWindow::findRunBinary() const {
     QFileInfo fi(cfg_.run_after_build.binary_path);
     if (fi.isAbsolute() && fi.exists() && fi.isExecutable()) return fi.absoluteFilePath();
     QString rel = fi.fileName();
-    for (const QString& sub : {"Debug", "Release"}) {
+    for (const char* sub : {"Debug", "Release"}) {
         QString p = cfg_.cwd + "/bin/" + sub + "/" + rel;
         QFileInfo fi2(p);
         if (fi2.exists() && fi2.isExecutable()) return fi2.absoluteFilePath();
@@ -716,7 +718,42 @@ void AbMainWindow::onRunCloud() {
     // 早期版本用 p->start + waitForFinished(-1) 会卡住 GUI, 而且 cloud_main 退出时
     // 才记一条 rc, 中间用户看不到任何 stderr. 这里改成 detached, 立刻 rc=0 表示启动成功.
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    // 1) 默认 vulkan ICD (nvidia 真机)
     env.insert("VK_ICD_FILENAMES", "/usr/share/vulkan/icd.d/nvidia_icd.json");
+    // 2) ai_build.json 里 run_after_build.env 全量注入 + $VAR 展开 (2026-09-02 修)
+    //    之前只塞 VK_ICD_FILENAMES, 漏了 BVWS_EMBED/BVWS_FORCE_PROJECT/LD_LIBRARY_PATH 等,
+    //    cloud_main 3D 区域空白 ([bvws_read_viewport] FAIL: no RenderingDevice)
+    for (auto it = cfg_.run_after_build.env.constBegin();
+         it != cfg_.run_after_build.env.constEnd(); ++it) {
+        QString val = it.value();
+        // $VAR 展开: "$LD_LIBRARY_PATH:/extra" → "<current>:extra"
+        // 支持多次出现同一个 $VAR
+        static QRegularExpression reVar(R"(\$([A-Za-z_][A-Za-z0-9_]*))");
+        QRegularExpressionMatchIterator mi = reVar.globalMatch(val);
+        int offset = 0;
+        QString expanded;
+        while (mi.hasNext()) {
+            auto m = mi.next();
+            expanded += val.mid(offset, m.capturedStart() - offset);
+            QString varName = m.captured(1);
+            expanded += env.value(varName);  // systemEnvironment 或之前 set 的
+            offset = m.capturedEnd();
+        }
+        expanded += val.mid(offset);
+        env.insert(it.key(), expanded);
+    }
+    // 3) 默认 wayland 渲染 (跟 godot_vulkan.md 规则一致, 用户本地 wayland + NVIDIA)
+    if (env.value("SDL_VIDEODRIVER").isEmpty()) {
+        env.insert("SDL_VIDEODRIVER", "wayland");
+    }
+    // 4) Qt5 QProcess::startDetached 没有 (program, args, env, cwd, pid) 5参 overload,
+    //    只能继承父进程 env. 用 qputenv 把 env 全量塞到父进程, fork 时子进程继承.
+    //    注意: 这会污染 ab 自身进程的 env, 启动 cloud_main 后 ab 也有这些 env.
+    //    副作用: 不影响 ab GUI 功能 (已经启动完了).
+    log("info", QString("  env: 注入 %1 个变量").arg(env.keys().size()));
+    for (const QString& k : env.keys()) {
+        qputenv(k.toUtf8().constData(), env.value(k).toUtf8());
+    }
     qint64 pid = 0;
     bool ok = QProcess::startDetached(cloud_binary_, args, cfg_.cwd, &pid);
     if (ok) {

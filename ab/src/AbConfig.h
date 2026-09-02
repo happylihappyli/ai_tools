@@ -19,6 +19,7 @@
 
 #include <QString>
 #include <QList>
+#include <QMap>
 #include <QSize>
 #include <vector>
 #include <string>
@@ -59,6 +60,7 @@ struct AbMenuDef {
 struct AbRunAfterBuild {
     QString binary_path;  // e.g. "bin/Debug/cloud_main"
     QStringList args;     // e.g. ["--rendering-driver","vulkan",...]
+    QMap<QString, QString> env;  // 注入到子进程, 支持 $VAR 展开
     bool auto_run = false;  // 编译成功后自动跑 (false=只启用按钮)
     QString button_label = "🚀 启动";
     QString on_success_task;  // 备用: 或跑指定 task

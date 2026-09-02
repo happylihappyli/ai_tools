@@ -20,3 +20,5 @@ step_data.json
 /ab/src/AbJson.h.gch
 /CMakeCache.txt
 
+.ai_tools/compile_ai_tools.log
+.ai_tools/compile_ab.log
