@@ -83,6 +83,8 @@ private:
     void runCmd(const QString& cmd, const QString& task_name = "<cmd>");
     void log(const QString& level, const QString& msg);
     QString resolveTaskCmd(const QString& task_name) const;
+    void speakTextAsync(const QString& text, bool log_when_disabled = false);
+    void speakTaskFinished(const QString& task_name, int exit_code) const;
     void runAutoQueue();
     void runNextInAuto();
     QAction* createActionForButton(const AbButtonDef& b, QWidget* parent);
@@ -109,7 +111,7 @@ private:
     QString cloud_binary_;  // 找到的 cloud_main 路径
     QString ac_binary_;     // 找到的 ac 绝对路径 (启动时探测, 解决桌面 GUI PATH 不带 ~/.local/bin 问题)
     QString spd_say_binary_;
-    QString bak_binary_;
+    bool tts_enabled_ = true;
 
     // 动作注册 (id → QAction*)
     QHash<QString, QAction*> actions_;

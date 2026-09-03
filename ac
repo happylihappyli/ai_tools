@@ -14,8 +14,8 @@ ac — AI 编译工具启动器 (AI Compile)
     ac --offscreen              # headless 模式 (沙箱/SSH)
     ac help                     # 显示帮助
 
-子命令 (转发到 ai_tools 同目录的工具脚本):
-    ac tts "消息"               # 文字转语音 (spd-say 包装)
+子命令 (内建或转发到 ai_tools 同目录工具):
+    ac tts "消息"               # 文字转语音 (ac 内建, 底层调 spd-say)
     ac bak <file> [<file>...]   # 备份文件 (带时间戳 .bak)
     ac ght                      # GitHub Token 管理 (GUI, 自动诊断)
     ac ght-cli                  # GitHub Token CLI 诊断
@@ -39,9 +39,13 @@ ac — AI 编译工具启动器 (AI Compile)
 import os
 import sys
 import json
+import re
+import shutil
+import argparse
 import subprocess
 import threading
 from pathlib import Path
+from datetime import datetime
 
 # 自动定位 ai_tools 目录 (这个脚本旁边)
 GT_DIR = Path(__file__).resolve().parent
@@ -50,31 +54,337 @@ COMPILE_TOOL = GT_DIR / "compile_tool.py"
 # 兜底用老 cpp_panel/ai_panel 兼容旧版
 AB_LAUNCHER  = GT_DIR / "ab_launcher"
 CPP_PANEL    = GT_DIR / "cpp_panel" / "ai_panel"
-TTS_TOOL = GT_DIR / "tts"
-BAK_TOOL = GT_DIR / "bak"
 GHT_TOOL = GT_DIR / "github_token"
 GHT_GUI = GT_DIR / "github_token_gui"
 AB_LAUNCHER = GT_DIR / "ab_launcher"   # 2026-09-01: 新 C++ ab GUI (替代 ac-gui)
 
-# ac 自己的子命令 (会拦截并转发, 不走 compile 后端)
+# ac 自己的子命令 (会拦截并内建处理/转发, 不走 compile 后端)
 SUBCOMMANDS = {"tts", "bak", "ght", "ght-cli", "ght-url", "ght-setup", "ab", "ab-gui"}
+
+DEFAULT_TTS_LANG = "zh"
+TTS_EVENT_TEMPLATES = {
+    "compile_start": "开始编译",
+    "compile_ok": "编译成功",
+    "compile_fail": "编译失败, {n} 个错误",
+    "compile_warn": "编译完成, {n} 个警告",
+    "test_start": "开始测试",
+    "test_ok": "测试通过",
+    "test_fail": "测试失败",
+    "deploy_ok": "部署完成",
+    "deploy_fail": "部署失败",
+}
+
+BAK_TS_FMT = "%Y%m%d_%H%M%S"
+BAK_TS_REGEX = re.compile(r"\.(\d{8}_\d{6})\.bak$")
+
+
+def find_spd_say() -> str:
+    return shutil.which("spd-say") or ""
+
+
+def tts_event_text(event: str, n: int = 0) -> str:
+    tmpl = TTS_EVENT_TEMPLATES.get(event, "")
+    if not tmpl:
+        return ""
+    kwargs = {"n": n} if "{n}" in tmpl else {}
+    return tmpl.format(**kwargs)
+
+
+def tts_cmd(text: str, *, lang: str = DEFAULT_TTS_LANG, rate: int = 0,
+            pitch: int = 0, volume: int = 0, wait: bool = False) -> list:
+    spd = find_spd_say()
+    if not spd:
+        return []
+    cmd = [spd, "-l", lang]
+    if rate:
+        cmd += ["-r", str(rate)]
+    if pitch:
+        cmd += ["-p", str(pitch)]
+    if volume:
+        cmd += ["-i", str(volume)]
+    if wait:
+        cmd += ["-w"]
+    cmd.append(text)
+    return cmd
+
+
+def bak_now_ts() -> str:
+    return datetime.now().strftime(BAK_TS_FMT)
+
+
+def bak_parse_ts_from_path(path: Path) -> datetime | None:
+    m = BAK_TS_REGEX.search(path.name)
+    if not m:
+        return None
+    try:
+        return datetime.strptime(m.group(1), BAK_TS_FMT)
+    except ValueError:
+        return None
+
+
+def bak_path_for(src: Path, ts: str | None = None) -> Path:
+    ts = ts or bak_now_ts()
+    return src.parent / f"{src.name}.{ts}.bak"
+
+
+def bak_list_for(src: Path) -> list[Path]:
+    return sorted(
+        src.parent.glob(f"{src.name}.*.bak"),
+        key=lambda p: bak_parse_ts_from_path(p) or datetime.min,
+        reverse=True,
+    )
+
+
+def bak_backup_one(src: Path, max_keep: int | None = None,
+                   dry: bool = False, verbose: bool = True) -> int:
+    if not src.exists():
+        sys.stderr.write(f"✗ {src}: 不存在\n")
+        return 1
+    dst = bak_path_for(src)
+    if dst.exists():
+        if verbose:
+            print(f"  ↳ {dst} 同秒已存在, 跳过重复备份")
+    else:
+        if dry:
+            print(f"[dry-run] cp {'-r ' if src.is_dir() else ''}{src} → {dst}")
+        else:
+            if src.is_dir():
+                shutil.copytree(src, dst)
+            else:
+                shutil.copy2(src, dst)
+            if verbose:
+                size = sum(p.stat().st_size for p in dst.rglob("*") if p.is_file()) if dst.is_dir() else dst.stat().st_size
+                print(f"✓ 备份 {src} → {dst}  ({size} bytes)")
+    if max_keep is not None and max_keep > 0:
+        for old in bak_list_for(src)[max_keep:]:
+            if dry:
+                print(f"[dry-run] rm {old}")
+            else:
+                if old.is_dir():
+                    shutil.rmtree(old)
+                else:
+                    old.unlink()
+                if verbose:
+                    print(f"  ↳ 删旧备份 {old}")
+    return 0
+
+
+def bak_do_list(cwd: Path) -> int:
+    baks = sorted(
+        list(cwd.glob("*.bak")) + [p for p in cwd.iterdir() if p.is_dir() and p.name.endswith(".bak")],
+        key=lambda p: bak_parse_ts_from_path(p) or datetime.min,
+        reverse=True,
+    )
+    if not baks:
+        print("(当前目录无 .bak 文件)")
+        return 0
+    print(f"{'时间戳':<18} {'类型':<6} {'大小':>10}  路径")
+    print("-" * 70)
+    for b in baks:
+        ts = bak_parse_ts_from_path(b)
+        ts_str = ts.strftime("%Y-%m-%d %H:%M:%S") if ts else "(无法解析)"
+        kind = "目录" if b.is_dir() else "文件"
+        size = sum(p.stat().st_size for p in b.rglob("*") if p.is_file()) if b.is_dir() else b.stat().st_size
+        print(f"{ts_str:<18} {kind:<6} {size:>10}  {b}")
+    return 0
+
+
+def bak_do_probe(src: Path) -> int:
+    if not src.exists() and not src.parent.exists():
+        sys.stderr.write(f"✗ {src.parent}: 父目录不存在\n")
+        return 1
+    baks = bak_list_for(src)
+    if not baks:
+        print(f"(无 {src.name} 的 .bak 历史)")
+        return 0
+    print(f"{'#':<4} {'时间戳':<18} {'大小':>10}  路径")
+    print("-" * 70)
+    for i, b in enumerate(baks, 1):
+        ts = bak_parse_ts_from_path(b)
+        ts_str = ts.strftime("%Y-%m-%d %H:%M:%S") if ts else "(无法解析)"
+        size = sum(p.stat().st_size for p in b.rglob("*") if p.is_file()) if b.is_dir() else b.stat().st_size
+        print(f"{i:<4} {ts_str:<18} {size:>10}  {b}")
+    print(f"\n恢复: ac bak --restore {src} -i <#>")
+    return 0
+
+
+def bak_do_restore(src: Path, index: int = 1, dry: bool = False,
+                   verbose: bool = True) -> int:
+    baks = bak_list_for(src)
+    if not baks:
+        sys.stderr.write(f"✗ 无 {src.name} 的 .bak 历史\n")
+        return 1
+    if index < 1 or index > len(baks):
+        sys.stderr.write(f"✗ 索引 {index} 越界 (1..{len(baks)})\n")
+        return 1
+    chosen = baks[index - 1]
+    if src.exists() and not dry:
+        print(f"⚠ {src} 已存在, 先备份当前状态")
+        bak_backup_one(src, verbose=False)
+    if dry:
+        print(f"[dry-run] restore {chosen} → {src}")
+        return 0
+    if src.exists() or src.is_symlink():
+        if src.is_dir() and not src.is_symlink():
+            shutil.rmtree(src)
+        else:
+            src.unlink()
+    if chosen.is_dir():
+        shutil.copytree(chosen, src)
+    else:
+        shutil.copy2(chosen, src)
+    if verbose:
+        print(f"✓ 恢复 {src} ← {chosen}")
+    return 0
+
+
+def bak_do_delete(src: Path, dry: bool = False, verbose: bool = True) -> int:
+    baks = bak_list_for(src)
+    if not baks:
+        print(f"(无 {src.name} 的 .bak, 不用删)")
+        return 0
+    for b in baks:
+        if dry:
+            print(f"[dry-run] rm {b}")
+        else:
+            if b.is_dir():
+                shutil.rmtree(b)
+            else:
+                b.unlink()
+            if verbose:
+                print(f"  ↳ 删 {b}")
+    print(f"✓ 删了 {len(baks)} 个 {src.name} 的 .bak")
+    return 0
+
+
+def run_bak_subcommand(sub_args: list) -> int:
+    p = argparse.ArgumentParser(
+        prog="ac bak",
+        description="ac 内建备份功能 (本地带时间戳 .bak, 不再依赖单独 bak 脚本)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="例: ac bak foo.txt | ac bak --list | ac bak --probe foo.txt | ac bak --restore foo.txt -i 2",
+    )
+    p.add_argument("paths", nargs="*", help="要备份的文件/目录")
+    p.add_argument("-l", "--list", action="store_true", help="列当前目录所有 .bak")
+    p.add_argument("-p", "--probe", metavar="FILE", help="看某文件/目录的所有 .bak 历史")
+    p.add_argument("-r", "--restore", metavar="FILE", help="从 .bak 恢复文件/目录")
+    p.add_argument("-i", "--index", type=int, default=1, help="配合 --restore, 第 N 个版本 (1=最近)")
+    p.add_argument("-d", "--delete", metavar="FILE", help="删某文件/目录的所有 .bak")
+    p.add_argument("--max", type=int, default=0, metavar="N", help="备份后只保留最近 N 个版本")
+    p.add_argument("--dry", action="store_true", help="试运行, 只显示不真做")
+    p.add_argument("--info", action="store_true", help="显示工具信息")
+    p.add_argument("-q", "--quiet", action="store_true", help="静默 (只显示错误)")
+    args = p.parse_args(sub_args)
+    verbose = not args.quiet
+
+    if args.info:
+        print("ac bak — 内建备份工具")
+        print(f"  ac 路径:    {Path(__file__).resolve()}")
+        print(f"  当前目录:  {Path.cwd()}")
+        print(f"  时间戳:    {bak_now_ts()}")
+        print("  命名规则:  <orig>.YYYYMMDD_HHMMSS.bak")
+        return 0
+    if args.list:
+        return bak_do_list(Path.cwd())
+    if args.probe:
+        return bak_do_probe(Path(args.probe))
+    if args.restore:
+        return bak_do_restore(Path(args.restore), args.index, args.dry, verbose)
+    if args.delete:
+        return bak_do_delete(Path(args.delete), args.dry, verbose)
+    if not args.paths:
+        p.print_help()
+        return 1
+
+    rc = 0
+    for p_str in args.paths:
+        rc |= bak_backup_one(Path(p_str), max_keep=args.max or None, dry=args.dry, verbose=verbose)
+    return rc
 
 
 def tts_async(event: str, n: int = 0) -> None:
-    """异步调 tts 工具播报事件 (不阻塞当前流程)"""
-    if not TTS_TOOL.exists():
+    """异步直接调 spd-say 播报事件 (不阻塞当前流程)"""
+    text = tts_event_text(event, n=n)
+    cmd = tts_cmd(text)
+    if not cmd:
         return
-    cmd = [sys.executable, str(TTS_TOOL), "--event", event]
-    if n:
-        cmd += ["-n", str(n)]
     try:
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
         pass  # tts 失败不影响主流程
 
 
+def run_tts_subcommand(sub_args: list) -> int:
+    p = argparse.ArgumentParser(
+        prog="ac tts",
+        description="ac 内建 TTS 功能 (spd-say, 不再依赖单独 tts 脚本)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='例: ac tts "编译成功" | ac tts --event compile_fail -n 3 | ac tts --check',
+    )
+    p.add_argument("text", nargs="*", help="要播报的文字")
+    p.add_argument("-l", "--language", default=DEFAULT_TTS_LANG, help="语言代码, 默认 zh")
+    p.add_argument("-r", "--rate", type=int, default=0, help="语速 -100..100")
+    p.add_argument("-p", "--pitch", type=int, default=0, help="音调 -100..100")
+    p.add_argument("-v", "--volume", type=int, default=0, help="音量 -100..100")
+    p.add_argument("-w", "--wait", action="store_true", help="等播报完成再返回")
+    p.add_argument("-e", "--event", help=f"播预定义事件: {', '.join(TTS_EVENT_TEMPLATES.keys())}")
+    p.add_argument("-n", type=int, default=0, help="配合 --event 传错误/警告数")
+    p.add_argument("--list", action="store_true", help="列 spd-say 可用声音")
+    p.add_argument("--stop", action="store_true", help="停止当前播报")
+    p.add_argument("--cancel", action="store_true", help="清空队列")
+    p.add_argument("--check", action="store_true", help="自检 spd-say 是否可用")
+    args = p.parse_args(sub_args)
+
+    spd = find_spd_say()
+    if args.check:
+        if not spd:
+            sys.stderr.write("✗ 找不到 spd-say, 安装: sudo apt install speech-dispatcher espeak-ng\n")
+            return 1
+        print(f"✓ spd-say: {spd}")
+        rc = subprocess.call([spd, "-l", args.language, "ac tts 自检完成"])
+        if rc != 0:
+            sys.stderr.write(f"✗ spd-say 自检失败 rc={rc}\n")
+        return rc
+    if args.list:
+        if not spd:
+            sys.stderr.write("✗ 找不到 spd-say\n")
+            return 1
+        return subprocess.call([spd, "-L"])
+    if args.stop:
+        if not spd:
+            sys.stderr.write("✗ 找不到 spd-say\n")
+            return 1
+        return subprocess.call([spd, "-S"])
+    if args.cancel:
+        if not spd:
+            sys.stderr.write("✗ 找不到 spd-say\n")
+            return 1
+        return subprocess.call([spd, "-C"])
+
+    text = ""
+    if args.event:
+        text = tts_event_text(args.event, n=args.n)
+        if not text:
+            sys.stderr.write(f"✗ 未知事件: {args.event}\n")
+            sys.stderr.write(f"  可用: {', '.join(TTS_EVENT_TEMPLATES.keys())}\n")
+            return 1
+        print(f"[ac tts event={args.event}] {text}")
+    elif args.text:
+        text = " ".join(args.text).strip()
+    else:
+        p.print_help()
+        return 1
+
+    cmd = tts_cmd(text, lang=args.language, rate=args.rate,
+                  pitch=args.pitch, volume=args.volume, wait=args.wait)
+    if not cmd:
+        sys.stderr.write("✗ 找不到 spd-say, 安装: sudo apt install speech-dispatcher espeak-ng\n")
+        return 1
+    return subprocess.call(cmd)
+
+
 def dispatch_subcommand(args: list) -> int:
-    """ac tts ... / ac bak ... / ac ght ... 转发
+    """ac tts ... / ac bak ... / ac ght ... 内建处理或转发
 
     注意: 工具脚本自己带 shebang, 用 OS 自动选解释器, 不要强制走 sys.executable.
     之前 `subprocess.call([sys.executable, str(tool)] + ...)` 会强制用 python 解释器,
@@ -106,9 +416,9 @@ def dispatch_subcommand(args: list) -> int:
             return 1
         return subprocess.call([str(GHT_TOOL), "--setup"])
     if sub == "tts":
-        tool = TTS_TOOL
+        return run_tts_subcommand(args[1:])
     elif sub == "bak":
-        tool = BAK_TOOL
+        return run_bak_subcommand(args[1:])
     elif sub in ("ab", "ab-gui"):
         # 2026-09-01: ab 是 C++ GUI 替代 ac-gui Python 版
         if not AB_LAUNCHER.exists():
@@ -117,10 +427,6 @@ def dispatch_subcommand(args: list) -> int:
         return subprocess.call([str(AB_LAUNCHER)] + args[1:])
     else:
         return 1
-    if not tool.exists():
-        sys.stderr.write(f"✗ 找不到子命令工具: {tool}\n")
-        return 1
-    return subprocess.call([str(tool)] + args[1:])
 
 
 def load_local_config():

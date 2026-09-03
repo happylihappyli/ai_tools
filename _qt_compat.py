@@ -135,8 +135,10 @@ if QT_BACKEND == "pyside6":
         Qt, QTimer, QObject, Signal, Slot, QProcess, QProcessEnvironment,
         QPointF, QRectF, QFileSystemWatcher
     )
+    # PySide6 6.5+ 把 QAction / QShortcut / QActionGroup 从 QtWidgets 移到了 QtGui
     from PySide6.QtGui import (
-        QAction, QBrush, QColor, QFont, QKeySequence, QPainter, QPainterPath,
+        QAction, QActionGroup, QShortcut,
+        QBrush, QColor, QFont, QKeySequence, QPainter, QPainterPath,
         QPalette, QPen, QTextCursor
     )
     from PySide6.QtWidgets import (
@@ -144,7 +146,7 @@ if QT_BACKEND == "pyside6":
         QGraphicsItem, QGraphicsPathItem, QGraphicsScene, QGraphicsTextItem, QGraphicsView,
         QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
         QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
-        QProgressBar, QPushButton, QShortcut, QSizePolicy, QSplitter, QStatusBar,
+        QProgressBar, QPushButton, QSizePolicy, QSplitter, QStatusBar,
         QTabWidget, QTextEdit, QToolBar, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
     )
     PYQT_VERSION_STR = QtCore.__version__ if hasattr(QtCore, "__version__") else "6"

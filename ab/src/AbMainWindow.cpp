@@ -16,10 +16,13 @@
 #include <QPushButton>
 #include <QStatusBar>
 #include <QAction>
+#include <QActionGroup>
 #include <QMenu>
 #include <QMenuBar>
 #include <QToolBar>
 #include <QKeySequence>
+#include <QInputDialog>
+#include <QLineEdit>
 #include <QFileInfo>
 #include <QDir>
 #include <QTimer>
@@ -32,6 +35,7 @@
 #include <QRegularExpression>
 #include <unistd.h>
 #include <cstdlib>
+#include <string>
 
 namespace ab {
 
@@ -65,7 +69,8 @@ AbMainWindow::AbMainWindow(const AbConfig& cfg, QWidget* parent)
     // 探测外部工具绝对路径 (避免桌面 GUI PATH 不带 ~/.local/bin)
     ac_binary_     = findTool("ac");
     spd_say_binary_ = findTool("spd-say");
-    bak_binary_    = findTool("bak");
+    const char* ac_no_tts = std::getenv("AC_NO_TTS");
+    tts_enabled_   = !(ac_no_tts && std::string(ac_no_tts) == "1");
     if (ac_binary_.isEmpty()) {
         log("warn", "未找到 ac 命令, 菜单 [GitHub Token 管理] 等会失败 (PATH 不全?)");
     } else {
@@ -73,6 +78,10 @@ AbMainWindow::AbMainWindow(const AbConfig& cfg, QWidget* parent)
     }
     if (spd_say_binary_.isEmpty()) {
         log("warn", "未找到 spd-say, TTS 播报不可用");
+    } else if (!tts_enabled_) {
+        log("info", QString("TTS 已关闭 (AC_NO_TTS=1, spd-say=%1)").arg(spd_say_binary_));
+    } else {
+        log("info", QString("TTS 已启用: %1").arg(spd_say_binary_));
     }
 
     // auto_start
@@ -462,21 +471,30 @@ void AbMainWindow::onActionTriggered() {
         return;
     }
     if (id == "tts") {
-        if (spd_say_binary_.isEmpty()) {
-            log("err", "✗ spd-say 未找到, TTS 不可用 (apt install speech-dispatcher?)");
+        bool ok = false;
+        QString text = QInputDialog::getText(
+            this,
+            "TTS 播报",
+            "请输入要播报的内容:",
+            QLineEdit::Normal,
+            "ab 工具链就绪",
+            &ok
+        );
+        if (!ok || text.trimmed().isEmpty()) {
+            log("info", "TTS 已取消");
             return;
         }
-        log("info", QString("→ 调 %1").arg(spd_say_binary_));
-        QProcess::startDetached(spd_say_binary_, QStringList() << "ab 工具链就绪");
+        log("info", QString("→ TTS: %1").arg(text));
+        speakTextAsync(text, true);
         return;
     }
     if (id == "bak") {
-        if (bak_binary_.isEmpty()) {
-            log("err", "✗ bak 未找到, 备份功能不可用");
+        if (ac_binary_.isEmpty()) {
+            log("err", "✗ ac 未找到, 备份功能不可用");
             return;
         }
-        log("info", QString("→ 调 %1 %2").arg(bak_binary_).arg(cfg_.cwd));
-        QProcess::startDetached(bak_binary_, QStringList() << cfg_.cwd);
+        log("info", QString("→ 调 %1 bak %2").arg(ac_binary_).arg(cfg_.cwd));
+        QProcess::startDetached(ac_binary_, QStringList() << "bak" << cfg_.cwd);
         return;
     }
     if (id == "proxy_test") {
@@ -546,6 +564,7 @@ void AbMainWindow::onRunAuto() {
 void AbMainWindow::runNextInAuto() {
     if (auto_index_ >= auto_queue_.size()) {
         log("ok", "auto 链全部完成 ✓");
+        speakTextAsync("全部完成");
         return;
     }
     QString name = auto_queue_[auto_index_++];
@@ -629,6 +648,7 @@ void AbMainWindow::onFinished(const QString& task_name, int exit_code, double el
     if (auto b = buttons_.value("run_selected")) b->setEnabled(true);
     if (auto b = buttons_.value("run_auto"))    b->setEnabled(true);
     if (auto b = buttons_.value("stop"))        b->setEnabled(false);
+    speakTaskFinished(task_name, exit_code);
 
     // 编译类 task 成功 → 找 cloud_main
     if (exit_code == 0 && (task_name == "build+deploy" || task_name == "build-only")) {
@@ -651,6 +671,29 @@ void AbMainWindow::onFinished(const QString& task_name, int exit_code, double el
         current_on_done_ = nullptr;
         cb();
     }
+}
+
+void AbMainWindow::speakTextAsync(const QString& text, bool log_when_disabled) {
+    if (text.trimmed().isEmpty()) return;
+    if (spd_say_binary_.isEmpty()) {
+        if (log_when_disabled) log("warn", "TTS 不可用: 未找到 spd-say");
+        return;
+    }
+    if (!tts_enabled_) {
+        if (log_when_disabled) log("info", QString("TTS 已关闭, 跳过播报: %1").arg(text));
+        return;
+    }
+    if (!QProcess::startDetached(spd_say_binary_, QStringList() << "-l" << "zh" << text)) {
+        if (log_when_disabled) log("warn", QString("TTS 启动失败: %1").arg(text));
+    }
+}
+
+void AbMainWindow::speakTaskFinished(const QString& task_name, int exit_code) const {
+    if (spd_say_binary_.isEmpty() || !tts_enabled_) return;
+    QString text = (exit_code == 0)
+        ? QString("任务 %1 成功").arg(task_name)
+        : QString("任务 %1 失败").arg(task_name);
+    QProcess::startDetached(spd_say_binary_, QStringList() << "-l" << "zh" << text);
 }
 
 void AbMainWindow::onError(const QString& task_name, int err) {
@@ -766,6 +809,7 @@ void AbMainWindow::onRunCloud() {
         log("ok", QString("✓ %1 已在后台启动, pid=%2").arg(QFileInfo(cloud_binary_).fileName()).arg(pid));
         log("info", QString("  stdout/stderr 直接进自己的终端/日志文件, 不进 ab 日志 dock"));
         log("info", QString("  停止: kill %1  或  pkill -f %2").arg(pid).arg(QFileInfo(cloud_binary_).fileName()));
+        speakTextAsync(QString("启动 %1").arg(QFileInfo(cloud_binary_).fileName()));
     } else {
         log("err", QString("✗ 启动失败: %1").arg(cloud_binary_));
     }
