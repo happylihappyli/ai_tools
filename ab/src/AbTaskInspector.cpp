@@ -73,7 +73,8 @@ void AbTaskInspector::buildUi() {
     tabs_ = new QTabWidget();
     // -- 任务 tab --
     task_tree_ = new QTreeWidget();
-    task_tree_->setHeaderLabels({"状态", "任务名", "说明", "上次结果", "耗时", "时间"});
+    // 2026-09-08 v2: 加 "命令" 列 (从主窗口 GroupBox 合并过来的功能, 让这里双击能跑)
+    task_tree_->setHeaderLabels({"状态", "任务名", "说明", "上次结果", "耗时", "时间", "命令"});
     task_tree_->setRootIsDecorated(false);
     task_tree_->setAlternatingRowColors(true);
     task_tree_->setColumnWidth(0, 50);
@@ -82,6 +83,7 @@ void AbTaskInspector::buildUi() {
     task_tree_->setColumnWidth(3, 80);
     task_tree_->setColumnWidth(4, 70);
     task_tree_->setColumnWidth(5, 130);
+    task_tree_->setColumnWidth(6, 320);
     connect(task_tree_, &QTreeWidget::itemDoubleClicked, this, &AbTaskInspector::onItemDoubleClicked);
     tabs_->addTab(task_tree_, "📋 任务");
 
@@ -176,6 +178,13 @@ void AbTaskInspector::refreshTasks() {
         it->setText(3, rc_text);
         it->setText(4, s.last_elapsed > 0 ? QString("%1s").arg(s.last_elapsed, 0, 'f', 1) : "—");
         it->setText(5, s.last_time.isEmpty() ? "—" : s.last_time);
+        // 2026-09-08 v2: 命令列 (从主窗口 GroupBox 合并过来, 让双击跑)
+        it->setText(6, t.cmd);
+        // 列 6 字体调小, 灰色显示 (命令是技术细节, 不抢视觉)
+        QFont cmd_font = it->font(6);
+        cmd_font.setPointSize(cmd_font.pointSize() - 1);
+        it->setFont(6, cmd_font);
+        it->setForeground(6, QColor("#888"));
         if (s.status == "ok") {
             for (int c = 0; c < 6; ++c) it->setForeground(c, QColor("#6a9955"));
         } else if (s.status == "err") {
@@ -350,12 +359,12 @@ void AbTaskInspector::onAutoTick() {
 void AbTaskInspector::onItemDoubleClicked(QTreeWidgetItem* it, int /*col*/) {
     QTreeWidget* src = it ? it->treeWidget() : nullptr;
     if (src == task_tree_) {
+        // 2026-09-08 v2: 双击任务直接跑 (合并主窗口 GroupBox 的功能)
+        //   之前这里只提示用户用 F5, 现在任务列表主窗口已删除, 这里就是唯一的任务入口
         QString name = it->text(1);
-        // 通知 main window 跑 (通过 signal 接到)
-        // 这里直接调 exit(0) 跑会不方便, 改成发信号
-        // 但更简单: 弹状态栏
-        // 用 QMessageBox 简短提示
-        if (info_lbl_) info_lbl_->setText(QString("✗ 双击任务请用工具栏 [▶ 跑选中] (F5), 选中后 F5 即可. 当前选中: %1").arg(name));
+        if (name.isEmpty()) return;
+        if (info_lbl_) info_lbl_->setText(QString("⚡ 触发跑任务: %1").arg(name));
+        emit requestRunTask(name);
     } else if (src == proc_tree_) {
         int pid = it->data(0, Qt::UserRole).toInt();
         QString comm = it->text(5);

@@ -82,7 +82,7 @@ from _qt_compat import (
     QStatusBar, QMessageBox, QColor, QFont, QFrame,
     QSizePolicy, QGroupBox, QProgressBar, QPlainTextEdit, QTextCursor,
     QAction, QMenu, QToolBar, QDockWidget, QKeySequence, QDialog,
-    QFileDialog, QInputDialog,
+    QFileDialog, QInputDialog, QTabWidget,
 )
 
 import ac_themes  # noqa: E402
@@ -258,34 +258,26 @@ class AcMainWindow(QMainWindow):
         self._tasks = {t["name"]: t for t in self._config.get("tasks", [])}
         self._runner = TaskRunner(self)
 
-        # ===== 中心 widget =====
+        # ===== 中心 widget (QTabWidget 拆 3 tab) =====
         central = QWidget()
         self.setCentralWidget(central)
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
+        outer = QVBoxLayout(central)
+        outer.setContentsMargins(8, 8, 8, 8)
+        outer.setSpacing(6)
 
-        # 顶部: 项目信息
-        info_frame = QFrame()
-        info_frame.setFrameShape(QFrame.StyledPanel)
-        # 走主题 QSS, 不强制样式
-        info_layout = QVBoxLayout(info_frame)
-        self._proj_label = QLabel(f"📁 {PROJECT_DIR}")
-        big = QFont()
-        big.setPointSize(13)
-        big.setBold(True)
-        self._proj_label.setFont(big)
-        info_layout.addWidget(self._proj_label)
+        self._tabs = QTabWidget()
+        self._tabs.setDocumentMode(True)
+        self._tabs.setTabPosition(QTabWidget.North)
+        outer.addWidget(self._tabs, 1)
 
-        self._auto_label = QLabel(
-            f"auto 链: {', '.join(self._config.get('auto', ['build+deploy']))}"
-        )
-        # 走主题 QSS, 不强制
-        info_layout.addWidget(self._auto_label)
-        layout.addWidget(info_frame)
+        # ---- Tab "任务" ----
+        task_page = QWidget()
+        task_root = QVBoxLayout(task_page)
+        task_root.setContentsMargins(8, 8, 8, 8)
+        task_root.setSpacing(6)
 
         # 任务列表
-        task_group = QGroupBox(f"任务列表 ({len(self._tasks)} 个)")
+        task_group = QGroupBox(f"任务列表 ({len(self._tasks)} 个) — 双击或选中按 F5")
         task_layout = QVBoxLayout(task_group)
         self._task_list = QTreeWidget()
         self._task_list.setHeaderLabels(["任务名", "说明", "命令"])
@@ -303,25 +295,24 @@ class AcMainWindow(QMainWindow):
             self._task_list.addTopLevelItem(item)
         self._task_list.itemDoubleClicked.connect(self.on_run_task_by_item)
         task_layout.addWidget(self._task_list)
-        layout.addWidget(task_group, 1)
+        task_root.addWidget(task_group, 1)
 
         # 进度条 + 当前任务
         prog_row = QHBoxLayout()
         self._prog_label = QLabel("当前: —")
-        # 走主题 QSS
         self._prog_bar = QProgressBar()
         self._prog_bar.setRange(0, 0)  # 不确定模式 (跑的时候转)
         self._prog_bar.setVisible(False)
         prog_row.addWidget(self._prog_label, 1)
         prog_row.addWidget(self._prog_bar, 2)
-        layout.addLayout(prog_row)
+        task_root.addLayout(prog_row)
 
         # 控制按钮行
         ctrl_row = QHBoxLayout()
-        self._btn_run = QPushButton("▶ 跑选中任务")
-        self._btn_stop = QPushButton("■ 停止")
-        self._btn_auto = QPushButton("⚡ 跑 Auto 链")
-        self._btn_run_cloud = QPushButton("🚀 启动 cloud_main")
+        self._btn_run = QPushButton("▶ 跑选中任务 (F5)")
+        self._btn_stop = QPushButton("■ 停止 (F7)")
+        self._btn_auto = QPushButton("⚡ 跑 Auto 链 (F6)")
+        self._btn_run_cloud = QPushButton("🚀 启动 cloud_main (Ctrl+R)")
         self._btn_stop.setEnabled(False)
         self._btn_run_cloud.setEnabled(False)  # 编译成功后启用
         ctrl_row.addWidget(self._btn_run)
@@ -329,7 +320,114 @@ class AcMainWindow(QMainWindow):
         ctrl_row.addWidget(self._btn_auto)
         ctrl_row.addWidget(self._btn_run_cloud)
         ctrl_row.addStretch(1)
-        layout.addLayout(ctrl_row)
+        task_root.addLayout(ctrl_row)
+
+        self._tabs.addTab(task_page, f"▶ 任务 ({len(self._tasks)})")
+
+        # ---- Tab "项目" ----
+        proj_page = QWidget()
+        proj_root = QVBoxLayout(proj_page)
+        proj_root.setContentsMargins(8, 8, 8, 8)
+        proj_root.setSpacing(6)
+
+        # 项目信息 (顶部)
+        info_frame = QFrame()
+        info_frame.setFrameShape(QFrame.StyledPanel)
+        info_layout = QVBoxLayout(info_frame)
+        self._proj_label = QLabel(f"📁 {PROJECT_DIR}")
+        big = QFont()
+        big.setPointSize(13)
+        big.setBold(True)
+        self._proj_label.setFont(big)
+        info_layout.addWidget(self._proj_label)
+
+        self._auto_label = QLabel(
+            f"auto 链: {', '.join(self._config.get('auto', ['build+deploy']))}"
+        )
+        info_layout.addWidget(self._auto_label)
+
+        # 二维 key=value 信息表
+        self._proj_info_form = QGroupBox("环境信息")
+        form_layout = QVBoxLayout(self._proj_info_form)
+        self._qt_backend_label = QLabel(f"Qt 后端: {QT_BACKEND}")
+        self._theme_label = QLabel(f"主题: {ac_themes.get_current_theme()}")
+        form_layout.addWidget(self._qt_backend_label)
+        form_layout.addWidget(self._theme_label)
+        info_layout.addWidget(self._proj_info_form)
+
+        # cloud_main 状态
+        self._cloud_status_box = QGroupBox("cloud_main 状态")
+        cloud_layout = QVBoxLayout(self._cloud_status_box)
+        self._cloud_status_label = QLabel("二进制: 检测中...")
+        self._cloud_status_label.setWordWrap(True)
+        cloud_layout.addWidget(self._cloud_status_label)
+        info_layout.addWidget(self._cloud_status_box)
+
+        proj_root.addWidget(info_frame)
+
+        # 工具按钮区
+        tools_box = QGroupBox("工具")
+        tools_layout = QHBoxLayout(tools_box)
+        self._btn_ght = QPushButton("🔑 GitHub Token (Ctrl+G)")
+        self._btn_tts = QPushButton("🔊 TTS 播报 (Ctrl+T)")
+        self._btn_bak = QPushButton("💾 备份项目 (Ctrl+B)")
+        self._btn_toggle_log = QPushButton("📋 切换日志 Dock")
+        self._btn_toggle_log.setCheckable(True)
+        tools_layout.addWidget(self._btn_ght)
+        tools_layout.addWidget(self._btn_tts)
+        tools_layout.addWidget(self._btn_bak)
+        tools_layout.addWidget(self._btn_toggle_log)
+        tools_layout.addStretch(1)
+        proj_root.addWidget(tools_box)
+
+        proj_root.addStretch(1)
+
+        self._tabs.addTab(proj_page, "📁 项目")
+
+        # ---- Tab "帮助" ----
+        help_page = QWidget()
+        help_root = QVBoxLayout(help_page)
+        help_root.setContentsMargins(8, 8, 8, 8)
+        help_root.setSpacing(6)
+
+        help_text = QPlainTextEdit()
+        help_text.setReadOnly(True)
+        help_text.setPlainText(
+            "ac 工具快捷键:\n"
+            "  F5  跑选中任务\n"
+            "  F6  跑 Auto 链\n"
+            "  F7  停止\n"
+            "  Ctrl+R  启动 cloud_main (编译成功后启用)\n"
+            "  Ctrl+G  GitHub Token 管理\n"
+            "  Ctrl+T  TTS 播报\n"
+            "  Ctrl+B  备份当前项目\n"
+            "\n"
+            "命令行:\n"
+            "  ac                    跑 ai_build.json 的 auto 链 (默认 build+deploy + diag)\n"
+            "  ac --task <name>      跑指定 task\n"
+            "  ac --preset <name>    跑指定 preset\n"
+            "  ac --cli --cmd '...'  跑一次性命令\n"
+            "  ac --offscreen        headless 模式 (沙箱/SSH)\n"
+            "  ac --gui              强制弹 C++ GUI 面板\n"
+            "  ac help               打印帮助\n"
+            "\n"
+            "配置文件: ai_build.json (项目根)\n"
+            "  tasks[].name / cmd / desc   任务列表\n"
+            "  auto                        auto 链\n"
+            "  preset                      编译预设\n"
+        )
+        help_text.setMinimumHeight(200)
+        help_root.addWidget(help_text, 1)
+
+        help_btn_row = QHBoxLayout()
+        self._btn_help_setup = QPushButton("🛠 配置帮助 (Ctrl+H)")
+        self._btn_about = QPushButton("ℹ 关于")
+        help_btn_row.addWidget(self._btn_help_setup)
+        help_btn_row.addWidget(self._btn_about)
+        help_btn_row.addStretch(1)
+        help_root.addLayout(help_btn_row)
+
+        self._tabs.addTab(help_page, "❓ 帮助")
 
         # 状态栏
         self._statusbar = QStatusBar()
@@ -352,6 +450,14 @@ class AcMainWindow(QMainWindow):
         self._btn_auto.clicked.connect(self.on_run_auto)
         self._btn_stop.clicked.connect(self.on_stop)
         self._btn_run_cloud.clicked.connect(self.on_run_cloud_main)
+        # 项目 tab 工具按钮
+        self._btn_ght.clicked.connect(self.on_open_ght)
+        self._btn_tts.clicked.connect(self.on_tts_prompt)
+        self._btn_bak.clicked.connect(self.on_bak_project)
+        self._btn_toggle_log.clicked.connect(self.on_toggle_log)
+        # 帮助 tab 按钮
+        self._btn_help_setup.clicked.connect(self.on_help_setup)
+        self._btn_about.clicked.connect(self.on_about)
 
         self._log("info", f"{APP_NAME} v{APP_VERSION} 启动")
         self._log("info", f"项目: {PROJECT_DIR}")

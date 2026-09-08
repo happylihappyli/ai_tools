@@ -61,6 +61,10 @@ public slots:
     // 通用槽: 按 id 触发 (按钮/工具栏/菜单 共用)
     void onActionTriggered();
 
+    // 2026-09-08 v2: 桥接 inspector signal (1 参) → runTaskByName (2 参, on_done 默认 nullptr)
+    //   Qt connect 要求 slot 参数 ≤ signal 参数, 不能直接连
+    void onInspectorRunTask(const QString& task_name);
+
 private:
     void buildFromConfig();
     // 2026-09-02: 框架内置通用 UI (所有调试程序都需要, 不依赖 ai_build.json)
@@ -95,12 +99,14 @@ private:
     AbTaskInspector* inspector_ = nullptr;  // 2026-09-02: 任务/进程检查器 dock
 
     // UI
-    QTreeWidget*   task_list_  = nullptr;
+    // 2026-09-08 v2: 主窗口不再持有 task_list_ (QTreeWidget), 任务列表合并到 inspector 任务 tab
+    // 2026-09-08 v4: central widget 清空, 进度条 + 项目路径 + auto 链 全部进状态栏
     QLabel*        prog_label_ = nullptr;
     QProgressBar*  prog_bar_   = nullptr;
     QStatusBar*    statusbar_  = nullptr;
-    QLabel*        sb_left_    = nullptr;
-    QLabel*        sb_right_   = nullptr;
+    QLabel*        sb_left_    = nullptr;   // 动态 log 状态 (✗/✓ msg)
+    QLabel*        sb_proj_    = nullptr;   // 2026-09-08 v4: 项目路径 + auto 链 (持久显示)
+    QLabel*        sb_right_   = nullptr;   // Qt/主题
 
     // 状态
     bool   current_aborted_ = false;

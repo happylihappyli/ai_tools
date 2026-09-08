@@ -53,6 +53,9 @@ AbMainWindow::AbMainWindow(const AbConfig& cfg, QWidget* parent)
     log("info", QString("项目: %1").arg(cfg_.cwd));
     log("info", QString("任务数: %1").arg(static_cast<int>(cfg_.tasks.size())));
     log("info", QString("主题: %1").arg(cfg_.theme));
+    // 2026-09-08 v4: auto 链也 log 一份, 这样 log dock 完整, 不必去状态栏看
+    log("info", QString("auto 链: %1")
+        .arg(cfg_.auto_chain.isEmpty() ? "(无)" : cfg_.auto_chain.join(" → ")));
 
     // 检查 cloud_main (如果配置了 run_after_build)
     if (!cfg_.run_after_build.binary_path.isEmpty()) {
@@ -84,6 +87,10 @@ AbMainWindow::AbMainWindow(const AbConfig& cfg, QWidget* parent)
         log("info", QString("TTS 已启用: %1").arg(spd_say_binary_));
     }
 
+    // 2026-09-08 v3: 把"任务列表在哪"这种提示信息放到操作日志里, 主窗口不显示
+    log("info", "💡 任务列表: 顶部 [任务检查器] → [📋 任务] tab, 双击行直接跑");
+    log("info", "💡 操作日志: 底部面板, 编译/任务输出实时滚出 (Ctrl+Shift+L 切换)");
+
     // auto_start
     if (cfg_.auto_start) {
         QTimer::singleShot(300, this, &AbMainWindow::onRunAuto);
@@ -109,15 +116,20 @@ void AbMainWindow::buildFromConfig() {
     buildMainButtons();     // 配置文件追加: 主按钮行 (项目特定, e.g. 自定义任务)
     if (cfg_.show_log_dock) {
         log_dock_ = new AbLogDock(this);
+        // 2026-09-08 v3: 操作日志放下面 (BottomDockWidgetArea)
         addDockWidget(Qt::BottomDockWidgetArea, log_dock_);
     }
-    // 2026-09-02: 任务/进程检查器 dock (放右侧, 默认显示)
+    // 2026-09-08 v3: 任务/进程检查器改放上面 (TopDockWidgetArea)
+    //   之前在右侧 (RightDockWidgetArea), 用户希望上面 (顶部), 跟操作日志上下分
     inspector_ = new AbTaskInspector(this);
     inspector_->setConfig(cfg_);
     inspector_->setCwd(cfg_.cwd);
-    addDockWidget(Qt::RightDockWidgetArea, inspector_);
-    // tabify 在 log dock 旁边
-    if (log_dock_) tabifyDockWidget(log_dock_, inspector_);
+    addDockWidget(Qt::TopDockWidgetArea, inspector_);
+    // 2026-09-08 v2: 任务 tab 双击直接跑 (之前主窗口 GroupBox 的功能合并过来)
+    //   signal requestRunTask(QString) → onInspectorRunTask(QString) → runTaskByName(name)
+    //   Qt connect 要求 slot 参数 ≤ signal 参数, 不能直接连 runTaskByName (2 参: name + on_done)
+    connect(inspector_, &AbTaskInspector::requestRunTask,
+            this, &AbMainWindow::onInspectorRunTask);
 }
 
 // 2026-09-02: 框架内置通用菜单 (所有调试程序都需要)
@@ -284,67 +296,49 @@ void AbMainWindow::buildBuiltInButtons() {
 }
 
 void AbMainWindow::buildTaskList() {
+    // 2026-09-08 v4: 主窗口中间完全清空, 只剩一个空的 central widget 占位
+    //   之前的信息 (项目路径 / auto 链 / 进度条) 全部移到状态栏
+    //   任务列表功能: 顶部 inspector 任务 tab (7 列 + 双击跑)
+    //   提示信息: 启动时 log dock 输出
+    //   QMainWindow 必须有 central widget, 留一个空的
     QWidget* central = new QWidget(this);
     setCentralWidget(central);
     QVBoxLayout* layout = new QVBoxLayout(central);
-    layout->setContentsMargins(12, 12, 12, 12);
-    layout->setSpacing(8);
-
-    // 顶部信息
-    QFrame* info = new QFrame();
-    QVBoxLayout* info_l = new QVBoxLayout(info);
-    QLabel* proj = new QLabel(QString("📁 %1").arg(cfg_.cwd));
-    QFont big;
-    big.setPointSize(13);
-    big.setBold(true);
-    proj->setFont(big);
-    info_l->addWidget(proj);
-    QLabel* auto_lbl = new QLabel(QString("auto 链: %1")
-        .arg(cfg_.auto_chain.isEmpty() ? "(无)" : cfg_.auto_chain.join(" → ")));
-    info_l->addWidget(auto_lbl);
-    layout->addWidget(info);
-
-    // 任务列表
-    QGroupBox* gb = new QGroupBox(QString("任务列表 (%1 个)").arg(static_cast<int>(cfg_.tasks.size())));
-    QVBoxLayout* gb_l = new QVBoxLayout(gb);
-    task_list_ = new QTreeWidget();
-    task_list_->setHeaderLabels({"任务名", "说明", "命令"});
-    task_list_->setRootIsDecorated(false);
-    task_list_->setAlternatingRowColors(true);
-    task_list_->setColumnWidth(0, 140);
-    task_list_->setColumnWidth(1, 240);
-    task_list_->setColumnWidth(2, 320);
-    connect(task_list_, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem* it, int){
-        QString name = it->text(0);
-        runTaskByName(name);
-    });
-    for (const auto& t : cfg_.tasks) {
-        auto* item = new QTreeWidgetItem();
-        item->setText(0, t.name);
-        item->setText(1, t.description);
-        item->setText(2, t.cmd);
-        task_list_->addTopLevelItem(item);
-    }
-    gb_l->addWidget(task_list_);
-    layout->addWidget(gb, 1);
-
-    // 进度条
-    QHBoxLayout* prog = new QHBoxLayout();
-    prog_label_ = new QLabel("当前: —");
-    prog_bar_ = new QProgressBar();
-    prog_bar_->setRange(0, 0);
-    prog_bar_->setVisible(false);
-    prog->addWidget(prog_label_, 1);
-    prog->addWidget(prog_bar_, 2);
-    layout->addLayout(prog);
+    layout->setContentsMargins(0, 0, 0, 0);  // 紧凑: 0 margin, 让中间区域完全消失
+    layout->setSpacing(0);
+    // 不放任何 widget, 让 central widget 高度最小
 }
 
 void AbMainWindow::buildStatusBar() {
+    // 2026-09-08 v4: 状态栏承载所有持久信息 (项目路径 + auto 链 + 进度条 + 动态 log 状态 + Qt 主题)
+    //   主窗口中间区域完全清空, 只剩 stretch
     statusbar_ = new QStatusBar(this);
     setStatusBar(statusbar_);
+
+    // 1) 最左: 项目路径 + auto 链 (持久显示, 不被 log 覆盖)
+    QString auto_text = cfg_.auto_chain.isEmpty() ? "(无)" : cfg_.auto_chain.join(" → ");
+    sb_proj_ = new QLabel(QString("📁 %1  |  auto: %2")
+                          .arg(cfg_.cwd, auto_text));
+    sb_proj_->setStyleSheet("color: #888; font-size: 11px;");
+    statusbar_->addWidget(sb_proj_, 1);  // 拉伸占 1 份
+
+    // 2) 中: 动态 log 状态 (✗/✓ msg, 被 log() 覆盖)
     sb_left_ = new QLabel("就绪");
-    statusbar_->addWidget(sb_left_, 1);
-    sb_right_ = new QLabel(QString("Qt=%1 | 主题=%2").arg(qApp ? "Qt5/6" : "?", cfg_.theme));
+    statusbar_->addWidget(sb_left_, 1);  // 拉伸占 1 份
+
+    // 3) 右: 进度条 + 进度文字 + Qt/主题 (addPermanentWidget 右对齐, 不拉伸)
+    prog_label_ = new QLabel("当前: —");
+    prog_label_->setStyleSheet("color: #888; font-size: 11px;");
+    statusbar_->addPermanentWidget(prog_label_);
+
+    prog_bar_ = new QProgressBar();
+    prog_bar_->setRange(0, 0);
+    prog_bar_->setVisible(false);
+    prog_bar_->setMaximumWidth(140);  // 限制宽度, 不挤
+    statusbar_->addPermanentWidget(prog_bar_);
+
+    sb_right_ = new QLabel(QString("Qt=%1 | 主题=%2")
+                           .arg(qApp ? "Qt5/6" : "?", cfg_.theme));
     statusbar_->addPermanentWidget(sb_right_);
 }
 
@@ -541,13 +535,24 @@ void AbMainWindow::onActionTriggered() {
 }
 
 void AbMainWindow::onRunSelectedTask() {
-    if (!task_list_) return;
-    auto* it = task_list_->currentItem();
-    if (!it) {
-        log("warn", "没选中任务");
+    // 2026-09-08 v2: 主窗口的 task_list_ 已删除, "跑选中" 改去 inspector 任务 tab 找
+    if (!inspector_) {
+        log("warn", "inspector 不存在");
         return;
     }
-    runTaskByName(it->text(0));
+    auto* it = inspector_->selectedTaskItem();
+    if (!it) {
+        log("warn", "没选中任务 (在右侧 [任务检查器] → [📋 任务] tab 选中一行, 再按 F5)");
+        return;
+    }
+    QString name = it->text(1);  // 列 1 = 任务名
+    runTaskByName(name);
+}
+
+void AbMainWindow::onInspectorRunTask(const QString& task_name) {
+    // 2026-09-08 v2: 桥接 inspector requestRunTask signal → runTaskByName
+    //   双击任务 tab 行触发, on_done = nullptr (非 auto 链)
+    runTaskByName(task_name);
 }
 
 void AbMainWindow::onRunAuto() {
