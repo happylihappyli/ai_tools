@@ -41,7 +41,7 @@ namespace ab {
 
 AbMainWindow::AbMainWindow(const AbConfig& cfg, QWidget* parent)
     : QMainWindow(parent), cfg_(cfg) {
-    setWindowTitle(cfg_.title);
+    updateWindowTitle();   // 2026-09-09: 初始窗口标题 = cfg_.title
     resize(cfg_.window);
 
     runner_ = new AbTaskRunner(this);
@@ -71,6 +71,7 @@ AbMainWindow::AbMainWindow(const AbConfig& cfg, QWidget* parent)
 
     // 探测外部工具绝对路径 (避免桌面 GUI PATH 不带 ~/.local/bin)
     ac_binary_     = findTool("ac");
+    ar_binary_     = findTool("ar");  // 2026-09-09: AI Run
     spd_say_binary_ = findTool("spd-say");
     const char* ac_no_tts = std::getenv("AC_NO_TTS");
     tts_enabled_   = !(ac_no_tts && std::string(ac_no_tts) == "1");
@@ -78,6 +79,11 @@ AbMainWindow::AbMainWindow(const AbConfig& cfg, QWidget* parent)
         log("warn", "未找到 ac 命令, 菜单 [GitHub Token 管理] 等会失败 (PATH 不全?)");
     } else {
         log("info", QString("ac: %1").arg(ac_binary_));
+    }
+    if (ar_binary_.isEmpty()) {
+        log("warn", QString::fromUtf8("未找到 ar 命令, [AR 运行工具] 按钮会失败 (装 ar_launcher 到 ~/.local/bin?)"));
+    } else {
+        log("info", QString("ar: %1").arg(ar_binary_));
     }
     if (spd_say_binary_.isEmpty()) {
         log("warn", "未找到 spd-say, TTS 播报不可用");
@@ -257,42 +263,31 @@ void AbMainWindow::buildBuiltInToolbar() {
 
     add("▶", "run_selected", "跑选中任务 (F5)", "F5");
     add("⚡", "run_auto",     "跑 Auto 链 (F6)", "F6");
-    add("■", "stop",         "停止当前 task (F7)", "F7");
+    tb->addSeparator();
+    // 2026-09-09: 4 个项目特定动作 (从 buildBuiltInButtons 合并到工具栏)
+    if (!cfg_.run_after_build.binary_path.isEmpty()) {
+        QString binary_name = QFileInfo(cfg_.run_after_build.binary_path).fileName();
+        QString btn_label = cfg_.run_after_build.button_label.isEmpty()
+                            ? QString("🚀 启动 %1").arg(binary_name)
+                            : cfg_.run_after_build.button_label;
+        add(QString("⚡ 编译并启动"), "build_and_run",
+            "编译 + 启动 " + binary_name);
+        add(btn_label, "run_cloud",
+            "启动已编译的 " + binary_name);
+        add("🎯 AR 运行工具", "open_ar",
+            QString::fromUtf8("调 ac ar 打开 AI Run 运行工具 (读 ai_build.json run_panel 段)"));
+        tb->addSeparator();
+        add("■ 停止", "stop",
+            "停止当前 task", "F7");
+    }
 }
 
-// 2026-09-02: 框架内置通用按钮 (编译并启动 / 启动 cloud_main / 停止)
-//   仅当 ai_build.json 配置了 run_after_build.binary_path 时才加
+// 2026-09-09 v3: 4 个中间按钮 (编译并启动/启动 cloud_main/AR/停止) 已合并到
+//   buildBuiltInToolbar (用户偏好: 工具栏统一管理, 中间不占空间)
+//   保留本函数为 no-op, 避免 buildUI 调用方不兼容
 void AbMainWindow::buildBuiltInButtons() {
-    if (cfg_.run_after_build.binary_path.isEmpty()) return;
-    QWidget* cw = centralWidget();
-    if (!cw) return;
-    QVBoxLayout* vl = qobject_cast<QVBoxLayout*>(cw->layout());
-    if (!vl) return;
-
-    QHBoxLayout* row = new QHBoxLayout();
-    auto addBtn = [&](const QString& label, const QString& id, const QString& tip, const QString& color, bool enabled) {
-        QPushButton* btn = new QPushButton(label, this);
-        btn->setToolTip(tip);
-        if (!color.isEmpty()) btn->setProperty("role", color);
-        btn->setEnabled(enabled);
-        btn->setProperty("abId", id);
-        connect(btn, &QPushButton::clicked, this, &AbMainWindow::onActionTriggered);
-        row->addWidget(btn);
-        buttons_[id] = btn;
-    };
-
-    QString binary_name = QFileInfo(cfg_.run_after_build.binary_path).fileName();
-    QString btn_label = cfg_.run_after_build.button_label.isEmpty()
-                        ? QString("🚀 启动 %1").arg(binary_name)
-                        : cfg_.run_after_build.button_label;
-    addBtn(QString("⚡ 编译并启动"), "build_and_run",
-           "编译 + 启动 " + binary_name, "primary", true);
-    addBtn(btn_label, "run_cloud",
-           "启动已编译的 " + binary_name, "success", !cloud_binary_.isEmpty());
-    addBtn("■ 停止", "stop", "停止当前 task", "danger", false);
-
-    row->addStretch(1);
-    vl->addLayout(row);
+    // 全部按钮已迁到 buildBuiltInToolbar — 这里什么都不做
+    (void)cfg_; (void)cloud_binary_; (void)ac_binary_; (void)ar_binary_;
 }
 
 void AbMainWindow::buildTaskList() {
@@ -464,6 +459,24 @@ void AbMainWindow::onActionTriggered() {
         }
         return;
     }
+    // 2026-09-09 v2: open_ar 改用 ac_binary_ 调 `ac ar` (避免系统 /usr/bin/ar 冲突)
+    if (id == "open_ar") {
+        if (ac_binary_.isEmpty()) {
+            log("err", QString::fromUtf8("✗ ac 未找到, 没法打开 AR 运行工具 (装 ai_tools 到 ~/.local/bin)"));
+            return;
+        }
+        QString config_arg = cfg_.cwd + "/ai_build.json";
+        log("info", QString("→ 调 %1 ar --config %2").arg(ac_binary_).arg(config_arg));
+        qint64 pid = 0;
+        QStringList ar_args;
+        ar_args << "ar" << "--config" << config_arg;
+        if (QProcess::startDetached(ac_binary_, ar_args, cfg_.cwd, &pid)) {
+            log("ok", QString("✓ AR 运行工具已启动, pid=%1").arg(pid));
+        } else {
+            log("err", "✗ 启动 ar 失败");
+        }
+        return;
+    }
     if (id == "tts") {
         bool ok = false;
         QString text = QInputDialog::getText(
@@ -584,6 +597,25 @@ QString AbMainWindow::resolveTaskCmd(const QString& task_name) const {
     return QString();
 }
 
+// 2026-09-09: 窗口标题动态显示当前命令
+//   空参数: 恢复 cfg_.title
+//   非空:   "<cfg_.title> — ▶ <task_name> (<cmd>)"
+//   例: 跑 view-log task 时标题变为 "godot_ui_linux — ab — ▶ view-log (tail -f /tmp/cloud_main.log)"
+void AbMainWindow::updateWindowTitle(const QString& current_cmd) {
+    current_cmd_ = current_cmd;
+    if (current_cmd.isEmpty()) {
+        setWindowTitle(cfg_.title);
+    } else {
+        // cmd 太长截断到 60 字符 (标题栏宽度有限)
+        QString short_cmd = current_cmd;
+        if (short_cmd.size() > 60) {
+            short_cmd = short_cmd.left(57) + "...";
+        }
+        setWindowTitle(QString("%1 — ▶ %2 (%3)")
+                       .arg(cfg_.title, current_task_, short_cmd));
+    }
+}
+
 void AbMainWindow::runTaskByName(const QString& name, std::function<void()> on_done) {
     if (runner_->isRunning()) {
         log("warn", "已有 task 在跑, 请先停止");
@@ -597,6 +629,8 @@ void AbMainWindow::runTaskByName(const QString& name, std::function<void()> on_d
     }
     log("task", QString("▶ 跑 task [%1]: %2").arg(name, cmd));
     current_task_ = name;
+    current_cmd_  = cmd;
+    updateWindowTitle(cmd);   // 2026-09-09: 窗口标题显示当前命令
     current_on_done_ = on_done;
     prog_label_->setText(QString("当前: %1").arg(name));
     prog_bar_->setVisible(true);
@@ -617,6 +651,8 @@ void AbMainWindow::runCmd(const QString& cmd, const QString& task_name) {
     }
     log("task", QString("▶ 跑 cmd [%1]: %2").arg(task_name, cmd));
     current_task_ = task_name;
+    current_cmd_  = cmd;
+    updateWindowTitle(cmd);   // 2026-09-09: 窗口标题显示当前命令
     current_on_done_ = nullptr;
     prog_bar_->setVisible(true);
     runner_->run(task_name, cmd, cfg_.cwd);
@@ -654,6 +690,7 @@ void AbMainWindow::onFinished(const QString& task_name, int exit_code, double el
     if (auto b = buttons_.value("run_auto"))    b->setEnabled(true);
     if (auto b = buttons_.value("stop"))        b->setEnabled(false);
     speakTaskFinished(task_name, exit_code);
+    updateWindowTitle();   // 2026-09-09: 恢复窗口标题 (清掉当前命令)
 
     // 编译类 task 成功 → 找 cloud_main
     if (exit_code == 0 && (task_name == "build+deploy" || task_name == "build-only")) {
@@ -703,6 +740,7 @@ void AbMainWindow::speakTaskFinished(const QString& task_name, int exit_code) co
 
 void AbMainWindow::onError(const QString& task_name, int err) {
     log("err", QString("[%1] QProcess 错误码 %2").arg(task_name).arg(err));
+    updateWindowTitle();   // 2026-09-09: 恢复窗口标题
 }
 
 QString AbMainWindow::findRunBinary() const {

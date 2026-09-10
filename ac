@@ -11,21 +11,26 @@ ac — AI 编译工具启动器 (AI Compile)
     ac --cmd "scons ..."        # 指定编译命令
     ac --test "./run.sh"        # 指定测试命令
     ac --cli --cmd "..."        # CLI 模式 (同步运行, 不弹 GUI)
+    ac --log <file>             # CLI 模式也写输出到文件 (默认 /tmp/ac_cli_<pid>_<ts>.log)
+    ac --tee <file>             # 同 --log (别名)
     ac --offscreen              # headless 模式 (沙箱/SSH)
     ac help                     # 显示帮助
 
 子命令 (内建或转发到 ai_tools 同目录工具):
     ac tts "消息"               # 文字转语音 (ac 内建, 底层调 spd-say)
+    ac notify "标题" "正文"      # 桌面通知 (notify-send, 解决没喇叭场景)
     ac bak <file> [<file>...]   # 备份文件 (带时间戳 .bak)
     ac ght                      # GitHub Token 管理 (GUI, 自动诊断)
     ac ght-cli                  # GitHub Token CLI 诊断
     ac ght-url                  # 打印 GitHub 生成 token 的 URL
     ac ght-setup                # 打印 step-by-step 生成指引
     ac ab                       # 启动 ab GUI (C++ Qt5/6, 替代 ac-gui Python 版)
+    ac ar                       # 启动 ar 运行工具 GUI (PyQt6, 读 ai_build.json run_panel)
     ac tts help                 # tts 帮助
     ac bak help                 # bak 帮助
     ac ght --help               # ght 帮助
     ac ab --help                # ab 帮助
+    ac ar --help                # ar 帮助
 
 废弃:
     ac-gui (Python 版本)         # 已废弃, 软链到 ab, 行为一致
@@ -44,6 +49,7 @@ import shutil
 import argparse
 import subprocess
 import threading
+import runpy  # 2026-09-10: 用来在同进程调 GUI runner (task-runner / task-browser)
 from pathlib import Path
 from datetime import datetime
 
@@ -58,8 +64,15 @@ GHT_TOOL = GT_DIR / "github_token"
 GHT_GUI = GT_DIR / "github_token_gui"
 AB_LAUNCHER = GT_DIR / "ab_launcher"   # 2026-09-01: 新 C++ ab GUI (替代 ac-gui)
 
+# 2026-09-09 新增: ar = AI Run (运行工具, 跟 ab 配对)
+# 读取 ai_build.json 的 run_panel 段, 启动 binary + 监控 + marker 检查
+AR_TOOL = GT_DIR / "ar.py"
+
 # ac 自己的子命令 (会拦截并内建处理/转发, 不走 compile 后端)
-SUBCOMMANDS = {"tts", "bak", "ght", "ght-cli", "ght-url", "ght-setup", "ab", "ab-gui"}
+SUBCOMMANDS = {"tts", "notify", "bak", "ght", "ght-cli", "ght-url", "ght-setup",
+              "ab", "ab-gui", "ar",
+              # 2026-09-10 加: 任务 GUI 工具 (整合到 ai_tools 内, 通用编译工具)
+              "task-browser", "task-runner", "tasks"}
 
 DEFAULT_TTS_LANG = "zh"
 TTS_EVENT_TEMPLATES = {
@@ -314,6 +327,427 @@ def tts_async(event: str, n: int = 0) -> None:
         pass  # tts 失败不影响主流程
 
 
+# ---------- 桌面通知 (notify-send) ----------
+# 2026-09-10 新增: ac notify <title> <body> - 跨进程调 notify-send 弹桌面通知
+# 解决公司电脑没喇叭场景: TTS 不工作也能视觉收到结果
+# 静默降级: notify-say 找不到就 no-op (不报错)
+
+_NOTIFY_BIN = shutil.which("notify-send") or shutil.which("kdialog") or shutil.which("zenity")
+
+# 全局: tts 是否启用 (main() 里设, step_notify 读)
+tts_enabled = True
+
+
+def notify_send(title: str, body: str = "", urgency: str = "normal",
+                icon: str = None, timeout_ms: int = 5000) -> bool:
+    """弹桌面通知, 静默降级. 成功返 True.
+
+    Args:
+        title: 通知标题
+        body: 通知正文 (多行 OK, notify-say 自动换行)
+        urgency: low / normal / critical
+        icon: dialog-info / dialog-warning / dialog-error / 自定义路径
+        timeout_ms: 自动消失毫秒数 (0=不自动消失, GNOME 桌面可能不尊重)
+    """
+    if not _NOTIFY_BIN:
+        return False
+    bin_name = Path(_NOTIFY_BIN).name
+    try:
+        if bin_name == "notify-send":
+            cmd = [_NOTIFY_BIN, title, body,
+                   "-u", urgency, "-t", str(timeout_ms)]
+            if icon:
+                cmd += ["-i", icon]
+        elif bin_name == "kdialog":
+            # kdialog --passivepopup "<body>" <seconds> --title "<title>"
+            sec = max(1, timeout_ms // 1000)
+            cmd = [_NOTIFY_BIN, "--passivepopup", body, str(sec),
+                   "--title", title]
+            if icon:
+                cmd += ["--icon", icon]
+        elif bin_name == "zenity":
+            # zenity --notification --text "<title>\n<body>"
+            cmd = [_NOTIFY_BIN, "--notification",
+                   f"--text={title}\n{body}"]
+        else:
+            return False
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except Exception:
+        return False
+
+
+def step_notify(step_name: str, status: str, next_action: str = "",
+                body_extra: str = "", urgent: bool = False) -> None:
+    """每步完成统一调: TTS (异步) + 桌面通知 (Popen) + 终端打印
+
+    用于"ac 工具每个步骤完毕自动弹消息"的需求. 即使公司电脑没喇叭, 通知也会弹.
+
+    Args:
+        step_name: 步骤名, e.g. "build+deploy", "[3/5] 编译 cloud_main"
+        status: "ok" / "fail" / "running"
+        next_action: 提示下一步跑啥, e.g. "下一步: ac --task view-log"
+        body_extra: 附加到 body 的内容, e.g. "log: /tmp/foo.log"
+        urgent: 失败时 urgent=True 让通知更强提示
+    """
+    if status == "ok":
+        icon = "dialog-info"
+        urgency = "critical" if urgent else "normal"
+        title_prefix = "✓"
+        tts_event = "compile_ok"
+    elif status == "fail":
+        icon = "dialog-error"
+        urgency = "critical"
+        title_prefix = "✗"
+        tts_event = "compile_fail"
+    else:
+        icon = "dialog-information"
+        urgency = "low"
+        title_prefix = "→"
+        tts_event = None
+
+    title = f"{title_prefix} ac: {step_name} [{status}]"
+    body_lines = []
+    if body_extra:
+        body_lines.append(body_extra)
+    if next_action:
+        body_lines.append(f"▶ {next_action}")
+    body = "\n".join(body_lines) if body_lines else ""
+
+    # 1) TTS (如果启用 + spd-say 在)
+    if tts_event and tts_enabled:
+        tts_async(tts_event)
+
+    # 2) 桌面通知 (即使 TTS 成功也发, 视觉冗余, 应对没喇叭场景)
+    if body:
+        notify_send(title, body, urgency=urgency, icon=icon, timeout_ms=8000)
+    else:
+        notify_send(title, step_name, urgency=urgency, icon=icon, timeout_ms=5000)
+
+    # 3) 终端打印 (用户直接看)
+    print(f"  📢 {title}")
+    if body:
+        for line in body.splitlines():
+            print(f"     {line}")
+
+
+# ---------- per-task log 保存 (task_browser_gui.py 用) ----------
+# 2026-09-10: 每个 task 跑完的 log 落盘到 /tmp/ac_task_logs/<task_name>/
+#   - <ts>.log         历史 log 文件
+#   - latest.log       symlink 到最近一次 log
+#   - latest.meta.json {ts, rc, log_file, cmd, type, category}
+# 任务浏览器 GUI 读这个目录展示 task 历史 log.
+TASK_LOG_ROOT = Path("/tmp/ac_task_logs")
+
+
+def _run_multi_subtasks(task_name: str, sub_cmds: list, args: list,
+                         local_config: dict) -> int:
+    """2026-09-10 新增: 串行执行 task 的多个 sub-task (cmd 是数组)
+    每个 sub-task:
+      - 独立 log: /tmp/ac_task_logs/<task_name>/<ts>_<idx>_<N>.log
+      - 独立 sub-meta: 含 sub_idx, sub_cmd, sub_rc
+    主 task log = latest.log (所有 sub-task 输出按顺序 append)
+    主 meta = latest.meta.json, 含 sub_logs 列表 + 总 rc
+    任意 sub-task 失败 (rc != 0) 立即停止, 返 rc
+    """
+    import time as _t
+    from datetime import datetime as _dt
+    import json as _json
+
+    if not sub_cmds:
+        return 0
+
+    task_dir = TASK_LOG_ROOT / task_name
+    task_dir.mkdir(parents=True, exist_ok=True)
+    ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+    n = len(sub_cmds)
+
+    print(f"\n{'='*70}")
+    print(f"🚀 task={task_name} | sub-task 总数: {n}")
+    print(f"   log dir: {task_dir}")
+    print(f"{'='*70}")
+
+    sub_logs = []
+    sub_metas = []
+    last_rc = 0
+    failed_at = -1
+
+    for idx, sub_cmd in enumerate(sub_cmds):
+        sub_log = task_dir / f"{ts}_{idx:02d}_of_{n:02d}.log"
+        sub_log.write_text(
+            f"# ac --task {task_name} sub-task [{idx+1}/{n}]\n"
+            f"# cmd: {sub_cmd}\n# ts: {ts}\n\n",
+            encoding="utf-8")
+        print(f"\n▶▶▶ sub-task [{idx+1}/{n}]  cmd: {sub_cmd[:80]}{'...' if len(sub_cmd)>80 else ''}")
+        print(f"   log: {sub_log}")
+        sub_meta = {
+            "sub_idx": idx,
+            "sub_n": n,
+            "sub_cmd": sub_cmd,
+            "sub_log": str(sub_log),
+            "sub_rc": -1,  # 初始化
+            "sub_ts_iso": _dt.now().isoformat(timespec="seconds"),
+        }
+        # 跑 sub-task (用 bash 跑命令, 支持 2>&1 / | tail / etc)
+        # 2026-09-10 修: bash 进程命令行只传 "bash", sub_cmd 通过 stdin 传
+        # 避免 pkill -f 'xxx' 模式匹配到 ac 自己的 bash 进程
+        # (因为 bash -c "pkill -f 'bin/Debug/cloud_main'..." 的命令行 args 里
+        #  含 'bin/Debug/cloud_main', 会被 pkill 自己 kill -9)
+        sub_t0 = _t.time()
+        try:
+            with open(sub_log, "a", encoding="utf-8") as lf:
+                lf.write(f"$ {sub_cmd}\n")
+                lf.flush()
+                proc = subprocess.Popen(
+                    ["bash"],  # 不加 -c, 用 stdin 传命令
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, bufsize=1, env=os.environ.copy(),
+                )
+                assert proc.stdin is not None
+                proc.stdin.write(sub_cmd)
+                proc.stdin.close()
+                for line in proc.stdout:
+                    sys.stdout.write(line)
+                    sys.stdout.flush()
+                    lf.write(line)
+                    lf.flush()
+                rc = proc.wait()
+        except Exception as e:
+            print(f"✗ sub-task [{idx+1}/{n}] 启动失败: {e}", file=sys.stderr)
+            rc = 127
+        sub_dt = _t.time() - sub_t0
+        sub_meta["sub_rc"] = rc
+        sub_meta["sub_dt_sec"] = round(sub_dt, 2)
+        sub_metas.append(sub_meta)
+        sub_logs.append(str(sub_log))
+        last_rc = rc
+        sym = "✓" if rc == 0 else "✗"
+        print(f"{sym} sub-task [{idx+1}/{n}] 完成 rc={rc}  ({sub_dt:.1f}s)")
+        # 失败立即停 (跟 && 行为一致)
+        if rc != 0:
+            failed_at = idx
+            print(f"\n✗✗✗ sub-task [{idx+1}/{n}] 失败, 停止后续 sub-task (rc={rc})")
+            break
+
+    # 主 log: append 所有 sub-task log
+    main_log = task_dir / f"{ts}.log"
+    with open(main_log, "w", encoding="utf-8") as mf:
+        mf.write(f"# ac --task {task_name} (multi-sub-task, 总 {n})\n"
+                 f"# ts: {ts}  rc(last)={last_rc}  failed_at={failed_at}\n\n")
+        for sl in sub_logs:
+            try:
+                with open(sl, "r", encoding="utf-8") as f:
+                    mf.write(f.read())
+            except OSError:
+                mf.write(f"# (sub-task log 读失败: {sl})\n")
+            mf.write("\n" + "-" * 60 + "\n\n")
+    # latest.log symlink
+    latest_link = task_dir / "latest.log"
+    try:
+        if latest_link.is_symlink() or latest_link.exists():
+            latest_link.unlink()
+    except OSError:
+        pass
+    try:
+        latest_link.symlink_to(main_log.name)
+    except OSError:
+        shutil.copy2(str(main_log), str(latest_link))
+
+    # 找 task type + category
+    task_type = "other"
+    task_category = "current"
+    if "tasks" in local_config:
+        for t in local_config["tasks"]:
+            if t.get("name") == task_name:
+                task_type = t.get("type", "other")
+                task_category = t.get("category", "current")
+                break
+
+    # 主 meta
+    main_meta = {
+        "ts": ts,
+        "ts_iso": _dt.now().isoformat(timespec="seconds"),
+        "task_name": task_name,
+        "rc": last_rc,  # 最后一个 sub-task 的 rc
+        "log_file": str(main_log),
+        "archive_log": str(main_log),
+        "cmd": sub_cmds,  # 数组形式
+        "type": task_type,
+        "category": task_category,
+        # 多 sub-task 专属字段
+        "is_multi_subtask": True,
+        "sub_task_total": n,
+        "sub_task_failed_at": failed_at,
+        "sub_tasks": sub_metas,  # 每个 sub-task 的 sub_idx/sub_cmd/sub_rc/sub_log
+        "sub_logs": sub_logs,
+    }
+    meta_file = task_dir / "latest.meta.json"
+    meta_file.write_text(_json.dumps(main_meta, ensure_ascii=False, indent=2),
+                          encoding="utf-8")
+
+    # 弹通知
+    status = "ok" if last_rc == 0 else "fail"
+    sym = "✓" if last_rc == 0 else "✗"
+    body = f"{sym} sub-task 完成 {idx+1}/{n}  rc={last_rc}  | log: {main_log}"
+    try:
+        step_notify(f"{task_name} (multi)", status,
+                    next_action=f"查看 log: cat {main_log}",
+                    body_extra=body, urgent=(last_rc != 0))
+    except Exception:
+        pass
+
+    print(f"\n{'='*70}")
+    print(f"{'✓' if last_rc == 0 else '✗'} task={task_name} 完成 rc={last_rc}  ({idx+1}/{n} sub-task)")
+    print(f"   主 log: {main_log}")
+    print(f"   meta:   {meta_file}")
+    print(f"   sub-task log: {task_dir}/{ts}_*.log")
+    print(f"{'='*70}\n")
+    return last_rc
+
+
+def _save_per_task_log(task_name: str, log_file: str, rc: int,
+                       cmd: list, local_config: dict) -> None:
+    """保存 per-task log 到 /tmp/ac_task_logs/<name>/"""
+    try:
+        import json as _json
+        from datetime import datetime as _dt
+        task_dir = TASK_LOG_ROOT / task_name
+        task_dir.mkdir(parents=True, exist_ok=True)
+        ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+        # 1) 历史 log
+        archive_log = task_dir / f"{ts}.log"
+        # 优先拷贝 --log 路径的内容, 否则把 stdout 内容包成空 log
+        src_log = Path(log_file) if log_file else None
+        if src_log and src_log.is_file():
+            try:
+                shutil.copy2(str(src_log), str(archive_log))
+            except OSError:
+                archive_log.write_text(f"# ac --task {task_name} at {ts}\n# log source: {log_file}\n# (copy failed, raw log: {log_file})\n", encoding="utf-8")
+        else:
+            archive_log.write_text(
+                f"# ac --task {task_name} at {ts} rc={rc}\n"
+                f"# (无 --log 文件, 仅记录 meta)\n",
+                encoding="utf-8")
+        # 2) latest.log symlink
+        latest_link = task_dir / "latest.log"
+        try:
+            if latest_link.is_symlink() or latest_link.exists():
+                latest_link.unlink()
+        except OSError:
+            pass
+        try:
+            latest_link.symlink_to(archive_log.name)
+        except OSError:
+            # 兜底: 直接复制
+            shutil.copy2(str(archive_log), str(latest_link))
+        # 3) latest.meta.json
+        # 找 task 的 type + category
+        task_type = "other"
+        task_category = "current"
+        if "tasks" in local_config:
+            for t in local_config["tasks"]:
+                if t.get("name") == task_name:
+                    task_type = t.get("type", "other")
+                    task_category = t.get("category", "current")
+                    break
+        meta = {
+            "ts": ts,
+            "ts_iso": _dt.now().isoformat(timespec="seconds"),
+            "task_name": task_name,
+            "rc": rc,
+            "log_file": log_file,
+            "archive_log": str(archive_log),
+            "cmd": cmd if isinstance(cmd, list) else [str(cmd)],
+            "type": task_type,
+            "category": task_category,
+        }
+        meta_file = task_dir / "latest.meta.json"
+        meta_file.write_text(_json.dumps(meta, ensure_ascii=False, indent=2),
+                              encoding="utf-8")
+    except Exception as e:
+        # per-task log 保存失败不影响主流程
+        print(f"⚠ _save_per_task_log 失败: {e}", file=sys.stderr)
+
+
+def list_task_logs(task_name: str) -> list:
+    """读 /tmp/ac_task_logs/<task_name>/ 下的所有历史 log, 按 ts 倒序
+
+    Returns: [{"ts": "20260910_120000", "log_file": "/path/to/log",
+               "rc": 0, "meta_file": "..."}, ...]
+    """
+    out = []
+    task_dir = TASK_LOG_ROOT / task_name
+    if not task_dir.is_dir():
+        return out
+    for meta_file in sorted(task_dir.glob("*.meta.json"), reverse=True):
+        try:
+            import json as _json
+            meta = _json.loads(meta_file.read_text(encoding="utf-8"))
+            out.append({
+                "ts": meta.get("ts", meta_file.stem),
+                "ts_iso": meta.get("ts_iso", ""),
+                "log_file": str(task_dir / (meta.get("ts", meta_file.stem) + ".log")),
+                "rc": meta.get("rc", -1),
+                "type": meta.get("type", "other"),
+                "category": meta.get("category", "current"),
+                "cmd": meta.get("cmd", []),
+            })
+        except Exception:
+            continue
+    return out
+
+
+def run_notify_subcommand(sub_args: list) -> int:
+    """ac notify <title> [body] - 调 notify-send 弹通知, 给其他脚本调.
+
+    用法:
+      ac notify "ac 编译完成" "log: /tmp/foo.log"
+      ac notify -u critical "编译失败" "看 /tmp/build.log 末 30 行"
+      ac notify -i dialog-error "标题" "正文"
+      ac notify -t 0 "持续显示的通知" "需要手动关"
+      ac notify --check          # 自检 notify-send 是否可用
+    """
+    p = argparse.ArgumentParser(
+        prog="ac notify",
+        description="ac 内建桌面通知 (notify-send / kdialog / zenity, 静默降级)",
+        epilog='例: ac notify "编译完成" "log: /tmp/foo.log"',
+    )
+    p.add_argument("title", nargs="?", help="通知标题")
+    p.add_argument("body", nargs="*", help="通知正文 (多词拼成一行)")
+    p.add_argument("-u", "--urgency", default="normal",
+                   choices=["low", "normal", "critical"], help="紧急度")
+    p.add_argument("-i", "--icon", help="图标 (dialog-info/warning/error 或路径)")
+    p.add_argument("-t", "--timeout", type=int, default=5000, metavar="MS",
+                   help="自动消失毫秒 (0=不消失)")
+    p.add_argument("--check", action="store_true", help="自检 notify-send 是否可用")
+    args = p.parse_args(sub_args)
+
+    if args.check:
+        if _NOTIFY_BIN:
+            print(f"✓ {_NOTIFY_BIN} (type={Path(_NOTIFY_BIN).name})")
+            return 0
+        sys.stderr.write("✗ 找不到 notify-send / kdialog / zenity\n")
+        sys.stderr.write("  安装: sudo apt install libnotify-bin\n")
+        return 1
+
+    if not args.title:
+        p.print_help()
+        return 1
+
+    body = " ".join(args.body).strip() if args.body else ""
+    ok = notify_send(args.title, body, urgency=args.urgency,
+                     icon=args.icon, timeout_ms=args.timeout)
+    if ok:
+        print(f"📢 notify ok: {args.title}")
+    else:
+        sys.stderr.write(f"⚠ notify 静默降级 (没装 notify-send/kdialog/zenity)\n")
+        print(f"  title: {args.title}")
+        if body:
+            print(f"  body:  {body}")
+    return 0 if ok else 0  # 永远 rc=0, 通知失败不影响主流程
+
+
 def run_tts_subcommand(sub_args: list) -> int:
     p = argparse.ArgumentParser(
         prog="ac tts",
@@ -419,12 +853,59 @@ def dispatch_subcommand(args: list) -> int:
         return run_tts_subcommand(args[1:])
     elif sub == "bak":
         return run_bak_subcommand(args[1:])
+    elif sub == "notify":
+        return run_notify_subcommand(args[1:])
     elif sub in ("ab", "ab-gui"):
         # 2026-09-01: ab 是 C++ GUI 替代 ac-gui Python 版
         if not AB_LAUNCHER.exists():
             sys.stderr.write(f"✗ 找不到 ab 启动器: {AB_LAUNCHER}\n")
             return 1
         return subprocess.call([str(AB_LAUNCHER)] + args[1:])
+    elif sub == "ar":
+        # 2026-09-09: ar = AI Run 运行工具 (PyQt6, 跟 ab 配对)
+        # 读 ai_build.json 的 run_panel 段, 启动 binary + 监控 + marker 检查
+        if not AR_TOOL.exists():
+            sys.stderr.write(f"✗ 找不到 ar: {AR_TOOL}\n")
+            return 1
+        # ar.py 是 Python 脚本, 用 sys.executable 调
+        return subprocess.call([sys.executable, str(AR_TOOL)] + args[1:])
+    elif sub in ("task-browser", "tasks", "task-runner"):
+        # 2026-09-10 整合: 任务 GUI 工具放在 ai_tools/ 内, 不再散落到项目目录
+        #   ac task-browser      → 启动 task browser GUI (左侧 44 task + 右侧 log)
+        #   ac tasks             → 同 task-browser 别名
+        #   ac task-runner <name>→ 启动 task runner GUI (跑指定 task, 实时进度)
+        #   ac task-runner       → 不带 name 时等效 task-browser
+        gui_scripts = {
+            "task-browser": GT_DIR / "task_browser_gui.py",
+            "tasks":        GT_DIR / "task_browser_gui.py",
+            "task-runner":  GT_DIR / "ac_task_runner_gui.py",
+        }
+        script = gui_scripts[sub]
+        if not script.is_file():
+            sys.stderr.write(f"✗ 找不到 GUI 脚本: {script}\n")
+            sys.stderr.write(f"  (应该在 ai_tools/ 目录里, 不在项目目录)\n")
+            return 1
+        # 透传剩余参数
+        # 例如: ac task-runner rebuild-v96r
+        #   args[1:] = ['rebuild-v96r'] → 给 runner 加 --task rebuild-v96r
+        rest = args[1:]
+        if sub == "task-runner" and rest and not rest[0].startswith("-"):
+            # ac task-runner <name>  → --task <name>
+            rest = ["--task"] + rest
+        elif sub == "task-runner" and not rest:
+            # 不带 name → 等效 ac task-browser
+            script = GT_DIR / "task_browser_gui.py"
+            rest = []
+        try:
+            sys.path.insert(0, str(GT_DIR))
+            sys.argv = [str(script)] + rest
+            runpy.run_path(str(script), run_name="__main__")
+            return 0
+        except SystemExit as e:
+            return e.code if isinstance(e.code, int) else 0
+        except Exception as e:
+            sys.stderr.write(f"✗ 启动失败: {e}\n")
+            return 1
     else:
         return 1
 
@@ -467,15 +948,55 @@ def main() -> int:
             task_name = args[idx + 1]
 
     if task_name and "tasks" in local_config:
+        # 2026-09-10: --task 默认走 GUI runner (PyQt6 弹窗口, 实时看 sub-task 进度)
+        # 除非用户显式 --cli 或 --no-gui
+        # 2026-09-10 修: 嵌套调用 (ac task-runner -> ac --task --cli) 时跳过 GUI
+        # env var AC_INNER_CALL=1 表示 "我是嵌套调用, 不要弹 GUI"
+        use_gui = ("--cli" not in args) and ("--no-gui" not in args) and os.environ.get("AC_INNER_CALL") != "1"
+        if use_gui:
+            # 2026-09-10 整合: GUI runner 在 ai_tools/ 内, 不再依赖 /home/bv/code/godot_ui_linux
+            gui_runner = GT_DIR / "ac_task_runner_gui.py"
+            if gui_runner.is_file():
+                try:
+                    import importlib
+                    if importlib.util.find_spec("PyQt6") is not None:
+                        # 找 cwd
+                        cwd = "/home/bv/code/godot_ui_linux"
+                        if "--cwd" in args:
+                            i = args.index("--cwd")
+                            if i + 1 < len(args):
+                                cwd = args[i + 1]
+                        elif "cwd" in local_config:
+                            cwd = local_config["cwd"]
+                        # 2026-09-10 整合: 直接 import GUI runner 模块, 不再走 subprocess
+                        # (原 subprocess 方式独立进程, 现在同进程调它的 main, 启动更快)
+                        print(f"🚀 启动 GUI runner: task={task_name}")
+                        print(f"   (用 --cli 强制 CLI 模式, --no-gui 跳过 GUI)")
+                        sys.path.insert(0, str(GT_DIR))
+                        sys.argv = [str(gui_runner), "--task", task_name]
+                        runpy.run_path(str(gui_runner), run_name="__main__")
+                        return 0
+                except SystemExit as e:
+                    return e.code if isinstance(e.code, int) else 0
+                except Exception as e:
+                    print(f"⚠ GUI runner 启动失败, 回退 CLI: {e}", file=sys.stderr)
         for t in local_config["tasks"]:
             if t.get("name") == task_name:
-                # 覆盖 --cmd 参数
-                if "--cmd" in args:
-                    c_idx = args.index("--cmd")
-                    if c_idx + 1 < len(args):
-                        args[c_idx + 1] = t["cmd"]
+                # 2026-09-10: task.cmd 可以是字符串 或 字符串数组 (sub-task list)
+                # 数组: 拆成多个 sub-task 串行跑, 每个 sub-task 独立 log
+                task_cmd = t.get("cmd", "")
+                if isinstance(task_cmd, list):
+                    # 标记为 multi-sub-task, 走 _run_multi_subtasks
+                    # 在 args 里加一个特殊标记, main 后面识别
+                    args.extend(["--__multi_cmds__"] + task_cmd)
                 else:
-                    args.extend(["--cmd", t["cmd"]])
+                    # 覆盖 --cmd 参数 (字符串, 单 sub-task)
+                    if "--cmd" in args:
+                        c_idx = args.index("--cmd")
+                        if c_idx + 1 < len(args):
+                            args[c_idx + 1] = task_cmd
+                    else:
+                        args.extend(["--cmd", task_cmd])
                 break
 
     # 如果命令行没给 --cmd 或 -c，且配置里有，则补上 (仅当没指定 task 时)
@@ -487,8 +1008,24 @@ def main() -> int:
         args.extend(["--test", local_config["test"]])
 
     # 是否关闭 tts 自动播报 (从 args 早期消费, 避免透传给 compile_tool.py)
+    # 2026-09-10: 用 global 让 step_notify 也能访问 (CLI 模式后弹通知需要)
+    global tts_enabled
     tts_enabled = ("--no-tts" not in args and os.environ.get("AC_NO_TTS") != "1")
     args = [a for a in args if a != "--no-tts"]
+
+    # 2026-09-10: 检测 --__multi_cmds__ 标记, 走多 sub-task 串行执行
+    if "--__multi_cmds__" in args:
+        mc_idx = args.index("--__multi_cmds__")
+        # 后面所有 arg 都是 sub-task 命令 (直到下一个 -- 开头的标记)
+        sub_cmds = []
+        i = mc_idx + 1
+        while i < len(args) and not args[i].startswith("--"):
+            sub_cmds.append(args[i])
+            i += 1
+        # 移除 --__multi_cmds__ 和它的参数
+        args = args[:mc_idx] + args[i:]
+        # 走多 sub-task 执行
+        return _run_multi_subtasks(task_name, sub_cmds, args, local_config)
 
     # 过滤掉 ac 自己的特殊参数
     def filter_args(input_args, exclude_list):
@@ -512,17 +1049,42 @@ def main() -> int:
     # --task, --preset, --offscreen 现在默认也走 GUI 模式以避免阻塞，除非同时指定了 --cli。
     use_cli = "--cli" in args
 
+    # 2026-09-10 新增: --log <file> 强制写输出到文件 (CLI 模式也支持, 解决 'scons 编译 30min
+    # 看不到进度 + 没法回看 log' 的痛点). --tee 是 --log 的简写别名, 行为一致.
+    # --log 默认放 /tmp/ac_cli_<ts>.log
+    log_file = None
+    if "--log" in args:
+        idx = args.index("--log")
+        if idx + 1 < len(args):
+            log_file = args[idx + 1]
+    elif "--tee" in args:
+        idx = args.index("--tee")
+        if idx + 1 < len(args):
+            log_file = args[idx + 1]
+    if log_file is None and use_cli:
+        # CLI 模式默认开 log, 用户没指定路径就用 PID + 时间戳
+        import time as _t
+        log_file = f"/tmp/ac_cli_{os.getpid()}_{int(_t.time())}.log"
+    # 过滤掉 ac 自己的 --log / --tee 参数 (不传给后端)
+    args_for_backend = args
+    if "--log" in args_for_backend:
+        i = args_for_backend.index("--log")
+        args_for_backend = args_for_backend[:i] + args_for_backend[i+2:]
+    if "--tee" in args_for_backend:
+        i = args_for_backend.index("--tee")
+        args_for_backend = args_for_backend[:i] + args_for_backend[i+2:]
+
     # 优先用 ab_launcher (新的 C++ Qt ab, 带源码检测), 兜底老 cpp_panel/ai_panel
     if AB_LAUNCHER.exists() and not use_cli:
         # ab_launcher 是 shell 脚本, 不能直接 exec; 通过 sh 调用
-        cmd = ["/bin/sh", str(AB_LAUNCHER)] + filter_args(args, ["--offscreen", "--cli"])
+        cmd = ["/bin/sh", str(AB_LAUNCHER)] + filter_args(args_for_backend, ["--offscreen", "--cli"])
     elif CPP_PANEL.exists() and not use_cli:
         # C++ 版本不认识 --offscreen 和 --cli
-        cmd = [str(CPP_PANEL)] + filter_args(args, ["--offscreen", "--cli"])
+        cmd = [str(CPP_PANEL)] + filter_args(args_for_backend, ["--offscreen", "--cli"])
     elif COMPILE_TOOL.exists():
         # Python 版本认识 --cli, --task, --preset，但不认识 --offscreen 和 --test
         # 移除强制添加 --cli 的逻辑，尊重用户是否选择 GUI 模式
-        cmd = [sys.executable, str(COMPILE_TOOL)] + filter_args(args, ["--offscreen", "--test"])
+        cmd = [sys.executable, str(COMPILE_TOOL)] + filter_args(args_for_backend, ["--offscreen", "--test"])
     else:
         sys.stderr.write(f"✗ 找不到编译工具 (C++ 或 Python 版本)\n")
         return 1
@@ -537,13 +1099,58 @@ def main() -> int:
     try:
         if use_cli:
             # CLI 模式: 同步运行，显示输出
-            rc = subprocess.call(cmd, env=env)
-            # 编译事件自动 tts 播报
+            # 2026-09-10: 如果 --log 设了, 同时显示在 terminal + 写文件 (用户在 terminal 看 + log 落盘).
+            # 默认 CLI 模式自动开 /tmp/ac_cli_<pid>_<ts>.log
+            # 实现: Python tee (Popen + read line + write 2 份), 不走 shell 包装, 避免
+            #   'scons --version' 被 shell 拆成 2 个 arg 的问题.
+            if log_file:
+                Path(log_file).parent.mkdir(parents=True, exist_ok=True)
+                log_fh = open(log_file, "w", encoding="utf-8", errors="replace")
+                print(f"📝 CLI log → {log_file} (ac 实时显示 + 落盘, 完成后: tail {log_file})")
+                # Popen 起来, 自己 tee
+                proc = subprocess.Popen(cmd, env=env,
+                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                        text=True, bufsize=1)
+                try:
+                    for line in proc.stdout:
+                        sys.stdout.write(line)
+                        sys.stdout.flush()
+                        log_fh.write(line)
+                        log_fh.flush()
+                except Exception as e:
+                    print(f"⚠ tee 读 stdout 失败: {e}", file=sys.stderr)
+                rc = proc.wait()
+                log_fh.close()
+            else:
+                rc = subprocess.call(cmd, env=env)
+            # 编译事件自动 tts 播报 + 桌面通知
+            # 2026-09-10: 加 step_notify 弹消息 (TTS + notify-send, 解决没喇叭场景)
             if tts_enabled:
-                if rc == 0:
-                    tts_async("compile_ok")
-                else:
-                    tts_async("compile_fail", n=0)
+                status = "ok" if rc == 0 else "fail"
+                # 找 task 名 (如果有)
+                step_label = task_name or "ac task"
+                next_act = ""
+                # 从 ai_build.json 找 task 的 desc 拿 next_action 提示
+                if task_name and "tasks" in local_config:
+                    for t in local_config["tasks"]:
+                        if t.get("name") == task_name:
+                            # 解析 desc 里 '用法: ac --task xxx' 这种提示
+                            desc = t.get("desc", "")
+                            if "下一步" in desc:
+                                # 抽取 "下一步: ..." 段
+                                idx = desc.find("下一步")
+                                next_act = desc[idx:idx+80].split(". ")[0]
+                            break
+                if not next_act and status == "ok":
+                    next_act = "查看 log: tail -f " + (log_file or "/tmp/ac_cli_*.log")
+                body = f"rc={rc} | log: {log_file}" if log_file else f"rc={rc}"
+                step_notify(step_label, status, next_action=next_act,
+                            body_extra=body, urgent=(rc != 0))
+            # 2026-09-10: per-task log 落盘 (task_browser_gui.py 读这个目录)
+            # 每个 task 的 log 存到 /tmp/ac_task_logs/<task_name>/<ts>.log
+            # + latest.log symlink + latest.meta.json (rc, log_file, ts, cmd, type, category)
+            if task_name:
+                _save_per_task_log(task_name, log_file or "", rc, cmd, local_config)
             return rc
         else:
             # GUI 模式: 异步启动，不阻塞终端，符合用户"不要让我点击"和"GUI 启动"的规则

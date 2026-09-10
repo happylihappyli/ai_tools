@@ -87,6 +87,11 @@ private:
     void runCmd(const QString& cmd, const QString& task_name = "<cmd>");
     void log(const QString& level, const QString& msg);
     QString resolveTaskCmd(const QString& task_name) const;
+    // 2026-09-09: 更新窗口标题 (当前命令)
+    //   默认: cfg_.title
+    //   跑 task 时: cfg_.title — ▶ <task_name> (<cmd>)
+    //   跑完 / 失败: 恢复 cfg_.title
+    void updateWindowTitle(const QString& current_cmd = QString());
     void speakTextAsync(const QString& text, bool log_when_disabled = false);
     void speakTaskFinished(const QString& task_name, int exit_code) const;
     void runAutoQueue();
@@ -113,9 +118,11 @@ private:
     QStringList auto_queue_;
     int    auto_index_ = 0;
     QString current_task_;
+    QString current_cmd_;     // 2026-09-09: 当前执行的命令 (用于窗口标题)
     std::function<void()> current_on_done_;
     QString cloud_binary_;  // 找到的 cloud_main 路径
     QString ac_binary_;     // 找到的 ac 绝对路径 (启动时探测, 解决桌面 GUI PATH 不带 ~/.local/bin 问题)
+    QString ar_binary_;     // 2026-09-09: 找到的 ar 绝对路径 (AI Run 运行工具)
     QString spd_say_binary_;
     bool tts_enabled_ = true;
 

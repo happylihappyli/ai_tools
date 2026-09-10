@@ -1,0 +1,23 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+#
+# ar — AI Run 运行工具 (PyQt6, 配置驱动)
+# 2026-09-09: 跟 ab (AI Build) 配对
+# 读 ai_build.json 的 run_panel 段, 启动 binary + 监控 + marker 检查
+# 不创建 ~/.local/bin/ar 软链 — 跟系统 /usr/bin/ar 冲突, 一律走 `ac ar` 入口
+
+SELF="$(readlink -f "$0")"
+SELF_DIR="$(dirname "$SELF")"
+AR_PY="$SELF_DIR/ar.py"
+
+if [ ! -f "$AR_PY" ]; then
+    echo "✗ 找不到 ar.py: $AR_PY" >&2
+    exit 1
+fi
+
+# 无显示 → offscreen
+if [ -z "$DISPLAY" ] && [ -z "$WAYLAND_DISPLAY" ] && [ -z "$QT_QPA_PLATFORM" ]; then
+    export QT_QPA_PLATFORM=offscreen
+fi
+
+exec python3 "$AR_PY" "$@"
