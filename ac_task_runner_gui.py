@@ -151,15 +151,24 @@ class AcRunner(QThread):
                     idx = int(m.group(1))
                     total = int(m.group(2))
                     cmd = m.group(3)
-                    # 缓存到 _pending_sub, 等下一行 "   log: ..." 补充 log_path 再 emit
-                    self._pending_sub = {"idx": idx, "total": total, "cmd": cmd}
+                    # 2026-09-10 改: cmd 是 stdout 截断的 80 字符版本, 缓存 _pending_sub
+                    # 等下面两行 (log: + cmd_full:) 补充完整信息再 emit
+                    self._pending_sub = {"idx": idx, "total": total, "cmd": cmd, "log_path": "", "cmd_full": ""}
                     self._sub_idx = idx
                     continue
-                # 匹配 "   log: /tmp/..." 行
+                # 匹配 "   log: /tmp/..." 行 → 缓存 log_path
                 m_log = re.search(r"^\s*log:\s*(\S+)", line)
                 if m_log and self._pending_sub:
+                    self._pending_sub["log_path"] = m_log.group(1)
+                    continue
+                # 2026-09-10 新增: 匹配 "   📋 cmd_full: <完整>" 行 → 拿完整 cmd
+                m_cmd_full = re.search(r"^\s*📋\s*cmd_full:\s*(.+)$", line)
+                if m_cmd_full and self._pending_sub:
+                    self._pending_sub["cmd_full"] = m_cmd_full.group(1).strip()
+                    # 三行都齐了 (log + cmd_full) → emit sub_started
                     p = self._pending_sub
-                    self.sub_started.emit(p["idx"], p["total"], p["cmd"], m_log.group(1))
+                    final_cmd = p["cmd_full"] if p["cmd_full"] else p["cmd"]
+                    self.sub_started.emit(p["idx"], p["total"], final_cmd, p["log_path"])
                     self._pending_sub = None
                     continue
                 m = RE_SUB_DONE.search(line)
@@ -249,6 +258,49 @@ class RunnerWindow(QMainWindow):
         )
         root.addWidget(self.progress)
 
+        # 2026-09-10 加: "当前运行" 区域 (大字显示正在执行的命令, 避免误以为卡住)
+        current_box = QFrame()
+        current_box.setFrameShape(QFrame.Shape.StyledPanel)
+        current_box.setStyleSheet(
+            "QFrame { background-color: #1a2a3a; border: 2px solid #4682b4; "
+            "border-radius: 4px; padding: 4px; }"
+        )
+        cb_layout = QVBoxLayout(current_box)
+        cb_layout.setContentsMargins(8, 4, 8, 4)
+        cb_layout.setSpacing(2)
+        # 顶行: 标题 + sub-task 编号
+        cur_top = QHBoxLayout()
+        cur_title = QLabel("⚡ 当前执行")
+        cur_title.setFont(QFont("sans-serif", 11, QFont.Weight.Bold))
+        cur_title.setStyleSheet("color: #88ccff;")
+        cur_top.addWidget(cur_title)
+        self.lbl_current_idx = QLabel("—")
+        self.lbl_current_idx.setFont(QFont("monospace", 12, QFont.Weight.Bold))
+        self.lbl_current_idx.setStyleSheet(
+            "background-color: #4682b4; color: #fff; padding: 2px 8px; "
+            "border-radius: 3px;"
+        )
+        cur_top.addWidget(self.lbl_current_idx)
+        self.lbl_current_dt = QLabel("")
+        self.lbl_current_dt.setFont(QFont("monospace", 10))
+        self.lbl_current_dt.setStyleSheet("color: #aaa;")
+        cur_top.addWidget(self.lbl_current_dt)
+        cur_top.addStretch()
+        cb_layout.addLayout(cur_top)
+        # 当前命令 (等宽字体, 自动换行, 高度 50px, 2-3 行)
+        self.txt_current_cmd = QPlainTextEdit()
+        self.txt_current_cmd.setReadOnly(True)
+        self.txt_current_cmd.setFont(QFont("monospace", 10))
+        self.txt_current_cmd.setMaximumHeight(70)
+        self.txt_current_cmd.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        self.txt_current_cmd.setStyleSheet(
+            "QPlainTextEdit { background-color: #0a1828; color: #ffeeaa; "
+            "border: 1px solid #2a4a6a; padding: 4px; }"
+        )
+        self.txt_current_cmd.setPlaceholderText("(等待 sub-task 开始)")
+        cb_layout.addWidget(self.txt_current_cmd)
+        root.addWidget(current_box)
+
         # 中间 split: 左侧 sub-task 列表 + 右侧 log
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setSizes([400, 1000])
@@ -312,15 +364,24 @@ class RunnerWindow(QMainWindow):
         self.btn_copy_sub_cmd.clicked.connect(self._on_copy_sub_cmd)
         detail_top.addWidget(self.btn_copy_sub_cmd)
         detail_layout.addLayout(detail_top)
-        # 命令区: 完整命令, 等宽字体
+        # 命令区: 完整命令, 等宽字体 (2026-09-10 改: 不限高度, 长命令完整显示 + 滚动)
         self.txt_detail_cmd = QPlainTextEdit()
         self.txt_detail_cmd.setReadOnly(True)
         self.txt_detail_cmd.setFont(QFont("monospace", 9))
-        self.txt_detail_cmd.setMaximumHeight(70)
-        self.txt_detail_cmd.setPlaceholderText("(鼠标点左侧 sub-task 列表, 这里显示完整命令)")
+        self.txt_detail_cmd.setMinimumHeight(80)        # 至少 4 行
+        self.txt_detail_cmd.setMaximumHeight(280)       # 最多 ~15 行, 不让窗口被撑爆
+        self.txt_detail_cmd.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)  # 长行自动换行
+        self.txt_detail_cmd.setPlaceholderText(
+            "(鼠标点左侧 sub-task 列表, 这里显示完整命令)\n"
+            "  ↕ 滚动查看完整命令 / Ctrl+A 全选 / Ctrl+C 复制"
+        )
         self.txt_detail_cmd.setStyleSheet(
             "QPlainTextEdit { background-color: #0a0a0a; color: #aaffaa; "
             "border: 1px solid #333; padding: 4px; }"
+        )
+        # 垂直滚动条永远显示 (用户知道可以滚动看完整命令)
+        self.txt_detail_cmd.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOn
         )
         detail_layout.addWidget(self.txt_detail_cmd)
         root.addWidget(detail_box)
@@ -481,6 +542,22 @@ class RunnerWindow(QMainWindow):
             self.sub_list.setCurrentRow(idx - 1)
             # 立即更新详情区
             self._show_sub_detail(idx)
+            # 2026-09-10 加: 顶部"当前执行"区域大字显示, 避免误以为卡住
+            self.lbl_current_idx.setText(f"[{idx}/{total}]")
+            self.lbl_current_idx.setStyleSheet(
+                "background-color: #ff8800; color: #fff; padding: 2px 8px; "
+                "border-radius: 3px;"
+            )
+            self.txt_current_cmd.setPlainText(cmd)
+            self._current_cmd_start_ts = time.time()
+            self.lbl_current_dt.setText("⏱ 0s")
+            # 启动当前命令计时器 (每 0.5s 刷新一次)
+            if not hasattr(self, "_current_dt_timer") or not self._current_dt_timer.isActive():
+                from PyQt6.QtCore import QTimer as _QT
+                if not hasattr(self, "_current_dt_timer"):
+                    self._current_dt_timer = _QT(self)
+                    self._current_dt_timer.timeout.connect(self._update_current_dt)
+                self._current_dt_timer.start(500)
 
     def _on_sub_done(self, idx: int, total: int, rc: int, dt: float):
         if idx not in self._sub_states:
@@ -509,7 +586,36 @@ class RunnerWindow(QMainWindow):
         # 进度
         done = sum(1 for s in self._sub_states.values() if s["status"] in ("ok", "fail"))
         self.progress.setValue(done)
-        self.progress.setFormat(f"{done} / {self._total}")
+        self.progress.setFormat(f"{done} / {total}")
+        # 2026-09-10 加: 当前命令完成 → "⚡ 当前执行" 区显示完成状态
+        # 如果还有下一个 sub-task, 它自己的 sub_started 会覆盖; 这里先标绿
+        self.lbl_current_idx.setStyleSheet(
+            "background-color: #44aa44; color: #fff; padding: 2px 8px; "
+            "border-radius: 3px;"
+        )
+        self.lbl_current_dt.setText(f"⏱ {dt:.1f}s ✓")
+        # 停当前命令计时器 (下一个 sub_started 时会重启)
+        if hasattr(self, "_current_dt_timer") and self._current_dt_timer.isActive():
+            # 不一定停, 因为下一个 sub-task 可能马上启动; 让下一个 sub_started 决定
+            # 但如果已经到最后一个, 关闭
+            if done >= total:
+                self._current_dt_timer.stop()
+                self.lbl_current_idx.setText("[DONE]")
+                self.lbl_current_idx.setStyleSheet(
+                    "background-color: #228822; color: #fff; padding: 2px 8px; "
+                    "border-radius: 3px;"
+                )
+
+    def _update_current_dt(self):
+        """每 0.5s 刷新一次当前命令的耗时, 避免误以为卡住"""
+        if not hasattr(self, "_current_cmd_start_ts"):
+            return
+        dt = time.time() - self._current_cmd_start_ts
+        if dt < 60:
+            self.lbl_current_dt.setText(f"⏱ {dt:.1f}s")
+        else:
+            m, s = divmod(int(dt), 60)
+            self.lbl_current_dt.setText(f"⏱ {m}m{s:02d}s")
 
     def _on_sub_failed(self, idx: int, total: int):
         # 在状态栏显示失败
@@ -610,8 +716,15 @@ class RunnerWindow(QMainWindow):
         if log_path:
             meta += f"  |  log: {log_path}"
         self.lbl_detail_meta.setText(meta)
-        # 命令区 (完整, 多行)
+        # 命令区 (完整, 多行) — 自动选中文本, 让用户立即知道有完整命令可复制
         self.txt_detail_cmd.setPlainText(cmd if cmd else "(空命令)")
+        if cmd:
+            # 全选 (让用户立刻知道可以 Ctrl+C 复制完整内容)
+            cursor = self.txt_detail_cmd.textCursor()
+            cursor.select(QTextCursor.SelectionType.Document)
+            self.txt_detail_cmd.setTextCursor(cursor)
+            # 取消焦点高亮, 但保持选择状态
+            self.txt_detail_cmd.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         # 启用按钮
         self.btn_copy_sub_cmd.setEnabled(bool(cmd))
         self.btn_open_sub_log.setEnabled(bool(log_path) and Path(log_path).exists())

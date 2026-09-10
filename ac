@@ -478,8 +478,11 @@ def _run_multi_subtasks(task_name: str, sub_cmds: list, args: list,
             f"# ac --task {task_name} sub-task [{idx+1}/{n}]\n"
             f"# cmd: {sub_cmd}\n# ts: {ts}\n\n",
             encoding="utf-8")
+        # 2026-09-10 修: stdout 主行仍截断到 80 字符方便人看, 但额外打一行 cmd_full 完整版
+        # GUI runner 解析 cmd_full 喂给 _sub_states (人类屏幕不会被撑爆, GUI 能拿完整)
         print(f"\n▶▶▶ sub-task [{idx+1}/{n}]  cmd: {sub_cmd[:80]}{'...' if len(sub_cmd)>80 else ''}")
         print(f"   log: {sub_log}")
+        print(f"   📋 cmd_full: {sub_cmd}")  # 完整 cmd, GUI runner 专门解析这一行
         sub_meta = {
             "sub_idx": idx,
             "sub_n": n,
@@ -498,20 +501,71 @@ def _run_multi_subtasks(task_name: str, sub_cmds: list, args: list,
             with open(sub_log, "a", encoding="utf-8") as lf:
                 lf.write(f"$ {sub_cmd}\n")
                 lf.flush()
+                # 2026-09-10 修: unbuffered + 实时 flush, 让 scons 编译信息实时显示
+                # (之前 bufsize=1 + text=True 仍可能 Popen buffer 满, 用户看不到)
+                tee_env = os.environ.copy()
+                tee_env["PYTHONUNBUFFERED"] = "1"  # scons Python 子进程不缓冲
                 proc = subprocess.Popen(
                     ["bash"],  # 不加 -c, 用 stdin 传命令
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    text=True, bufsize=1, env=os.environ.copy(),
+                    bufsize=0,  # unbuffered (binary), 强制实时
+                    env=tee_env,
                 )
                 assert proc.stdin is not None
-                proc.stdin.write(sub_cmd)
+                proc.stdin.write(sub_cmd.encode("utf-8"))
                 proc.stdin.close()
-                for line in proc.stdout:
-                    sys.stdout.write(line)
-                    sys.stdout.flush()
-                    lf.write(line)
-                    lf.flush()
+                # 实时 tee: 每字节读就 sys.stdout.write + lf.write
+                # 不用 line buffer, 因为 scons 编译输出可能 \r 覆盖 (进度行)
+                assert proc.stdout is not None
+                # 强制 stdout + lf 都 line buffered
+                if hasattr(sys.stdout, "reconfigure"):
+                    try:
+                        sys.stdout.reconfigure(line_buffering=True)
+                    except Exception:
+                        pass
+                line_buf = ""
+                last_progress_ts = _t.time()
+                while True:
+                    chunk = proc.stdout.read(1)
+                    if not chunk:
+                        # EOF
+                        if line_buf:
+                            sys.stdout.write(line_buf)
+                            sys.stdout.flush()
+                            lf.write(line_buf)
+                            lf.flush()
+                        break
+                    ch = chunk.decode("utf-8", errors="replace")
+                    if ch == "\n":
+                        # 完整行
+                        sys.stdout.write(line_buf + "\n")
+                        sys.stdout.flush()
+                        lf.write(line_buf + "\n")
+                        lf.flush()
+                        line_buf = ""
+                    elif ch == "\r":
+                        # 进度行 (scons [N/M] 覆盖式) → 不换行, 但加 [PROGRESS] 前缀给 GUI 识别
+                        if line_buf.strip():
+                            # 输出但用 \r 不换行 (terminal 覆盖) + 加前缀
+                            tagged = f"[PROGRESS] {line_buf.strip()}\n"
+                            sys.stdout.write(tagged)
+                            sys.stdout.flush()
+                            lf.write(tagged)
+                            lf.flush()
+                            # 5s 提示用户还在跑
+                            now = _t.time()
+                            if now - last_progress_ts > 5:
+                                elapsed = now - sub_t0
+                                hint = f"  ⏳ [ac] sub-task [{idx+1}/{n}] 还在跑, 已 {elapsed:.0f}s\n"
+                                sys.stdout.write(hint)
+                                sys.stdout.flush()
+                                lf.write(hint)
+                                lf.flush()
+                                last_progress_ts = now
+                        line_buf = ""
+                    else:
+                        line_buf += ch
                 rc = proc.wait()
         except Exception as e:
             print(f"✗ sub-task [{idx+1}/{n}] 启动失败: {e}", file=sys.stderr)
