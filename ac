@@ -1038,19 +1038,23 @@ def main() -> int:
             if t.get("name") == task_name:
                 # 2026-09-10: task.cmd 可以是字符串 或 字符串数组 (sub-task list)
                 # 数组: 拆成多个 sub-task 串行跑, 每个 sub-task 独立 log
+                # 字符串: 2026-09-10 修 — 自动包装成 [cmd] 走 multi-sub-task 路径,
+                #   这样 GUI runner 永远能显示 sub-task 列表 (1 个或多个)
                 task_cmd = t.get("cmd", "")
                 if isinstance(task_cmd, list):
                     # 标记为 multi-sub-task, 走 _run_multi_subtasks
-                    # 在 args 里加一个特殊标记, main 后面识别
                     args.extend(["--__multi_cmds__"] + task_cmd)
+                elif isinstance(task_cmd, str) and task_cmd:
+                    # 字符串 → 包装成 1 个 sub-task 的 list
+                    args.extend(["--__multi_cmds__", task_cmd])
                 else:
-                    # 覆盖 --cmd 参数 (字符串, 单 sub-task)
+                    # 覆盖 --cmd 参数 (空 cmd, 不太可能)
                     if "--cmd" in args:
                         c_idx = args.index("--cmd")
                         if c_idx + 1 < len(args):
-                            args[c_idx + 1] = task_cmd
+                            args[c_idx + 1] = str(task_cmd)
                     else:
-                        args.extend(["--cmd", task_cmd])
+                        args.extend(["--cmd", str(task_cmd)])
                 break
 
     # 如果命令行没给 --cmd 或 -c，且配置里有，则补上 (仅当没指定 task 时)
