@@ -964,15 +964,52 @@ def dispatch_subcommand(args: list) -> int:
         return 1
 
 
+def find_ai_build_json():
+    """找 ai_build.json: 1) cwd  2) cwd 向上  3) ~/code/*/ai_build.json (project registry)
+    返回 (config_path, project_root) — project_root 用于透传给子进程 (--cwd / --project)
+    """
+    # 1) cwd 直接
+    cur = Path.cwd()
+    direct = cur / "ai_build.json"
+    if direct.exists() and direct.is_file():
+        return direct, cur
+
+    # 2) cwd 向上 (最多 10 层)
+    cur2 = Path.cwd()
+    for _ in range(10):
+        candidate = cur2 / "ai_build.json"
+        if candidate.exists() and candidate.is_file():
+            return candidate, cur2
+        parent = cur2.parent
+        if parent == cur2:
+            break
+        cur2 = parent
+
+    # 3) 已知 project 路径: ~/code/*/ai_build.json (用户在多项目间切换)
+    code_dir = Path.home() / "code"
+    if code_dir.is_dir():
+        for proj in sorted(code_dir.iterdir()):
+            if proj.is_dir():
+                candidate = proj / "ai_build.json"
+                if candidate.exists() and candidate.is_file():
+                    return candidate, proj
+
+    return None, None
+
+
 def load_local_config():
-    """从当前目录读取 ai_build.json 配置"""
-    config_path = Path.cwd() / "ai_build.json"
-    if config_path.exists():
+    """从当前目录 (或向上找) 读取 ai_build.json 配置"""
+    config_path, project_root = find_ai_build_json()
+    if config_path:
         try:
             with open(config_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                cfg = json.load(f)
+            # 记一下实际项目根, 后面要用 (补 --cwd 用)
+            cfg["_resolved_from"] = str(config_path.parent)
+            cfg["_project_root"] = str(project_root) if project_root else str(config_path.parent)
+            return cfg
         except Exception as e:
-            sys.stderr.write(f"⚠ 读取 ai_build.json 失败: {e}\n")
+            sys.stderr.write(f"⚠ 读取 {config_path} 失败: {e}\n")
     return {}
 
 
@@ -1131,6 +1168,23 @@ def main() -> int:
     if "--tee" in args_for_backend:
         i = args_for_backend.index("--tee")
         args_for_backend = args_for_backend[:i] + args_for_backend[i+2:]
+
+    # 2026-09-11 修: ac 用 --cwd, 但 ab 接收 --project /path/to/proj
+    # 转 --cwd → --project 给 ab (CPP_PANEL / compile_tool 也都不认 --cwd)
+    if "--cwd" in args_for_backend:
+        i = args_for_backend.index("--cwd")
+        if i + 1 < len(args_for_backend) and not args_for_backend[i+1].startswith("-"):
+            cwd_value = args_for_backend[i+1]
+            args_for_backend = args_for_backend[:i] + ["--project", cwd_value] + args_for_backend[i+2:]
+        else:
+            args_for_backend = args_for_backend[:i] + args_for_backend[i+1:]
+    if "-d" in args_for_backend:
+        i = args_for_backend.index("-d")
+        if i + 1 < len(args_for_backend) and not args_for_backend[i+1].startswith("-"):
+            cwd_value = args_for_backend[i+1]
+            args_for_backend = args_for_backend[:i] + ["--project", cwd_value] + args_for_backend[i+2:]
+        else:
+            args_for_backend = args_for_backend[:i] + args_for_backend[i+1:]
 
     # 优先用 ab_launcher (新的 C++ Qt ab, 带源码检测), 兜底老 cpp_panel/ai_panel
     if AB_LAUNCHER.exists() and not use_cli:
