@@ -158,6 +158,8 @@ private:
     QProgressBar*panel_progress_      = nullptr;
     // 当前执行区
     QFrame*      panel_current_box_   = nullptr;
+    // 2026-09-16 v8: 把"⚡ 当前执行"和"📜 选中任务详情"合并到 QTabWidget (panel_task_tab_)
+    QTabWidget*  panel_task_tab_      = nullptr;
     QLabel*      panel_lbl_current_idx_ = nullptr;
     QLabel*      panel_lbl_current_dt_  = nullptr;
     QPlainTextEdit* panel_txt_current_cmd_ = nullptr;

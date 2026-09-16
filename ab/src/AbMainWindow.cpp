@@ -131,7 +131,12 @@ AbMainWindow::AbMainWindow(const AbConfig& cfg, QWidget* parent)
     log("info", "💡 操作日志: 底部面板, 编译/任务输出实时滚出 (Ctrl+Shift+L 切换)");
 
     // auto_start
-    if (cfg_.auto_start) {
+    // 2026-09-16 v7: 强制 cerr log, 确认 QTimer 真触发 + cfg_.auto_start 值
+    std::fprintf(stderr, "[ab] auto_start=%s, auto_chain=[%s], schedule QTimer 300ms → onRunAuto\n",
+                 cfg_.auto_start ? "true" : "false",
+                 cfg_.auto_chain.join(", ").toUtf8().constData());
+    std::fflush(stderr);
+    if (cfg_.auto_start && !cfg_.auto_chain.isEmpty()) {
         QTimer::singleShot(300, this, &AbMainWindow::onRunAuto);
     }
 }
@@ -169,6 +174,16 @@ void AbMainWindow::wireRunner() {
                     }
                 }
             });
+    // 2026-09-16 v9: bug 修复 - onSubStartedPanel / onSubFinishedPanel / onSubFailedPanel
+    //   之前是孤儿函数, 从没 connect 到 runner_->sub_* signal, 导致中央面板 sub-task 列表
+    //   不刷新状态 (跑完了还显示静态 4 行), 用户反馈"为什么半自动运行" 实际是 UI 没反馈
+    //   现在 connect 后, 中央面板会实时高亮当前 sub-task + 进度条 + ✓/✗ 状态
+    connect(runner_, &AbTaskRunner::sub_started,
+            this, &AbMainWindow::onSubStartedPanel);
+    connect(runner_, &AbTaskRunner::sub_finished,
+            this, &AbMainWindow::onSubFinishedPanel);
+    connect(runner_, &AbTaskRunner::sub_failed,
+            this, &AbMainWindow::onSubFailedPanel);
 }
 
 void AbMainWindow::buildFromConfig() {
@@ -484,7 +499,7 @@ void AbMainWindow::buildCentralPanel() {
         "border: 1px solid #2a4a6a; padding: 4px; }");
     panel_txt_current_cmd_->setPlaceholderText("(等待 sub-task 开始)");
     cb_layout->addWidget(panel_txt_current_cmd_);
-    root->addWidget(panel_current_box_);
+    // 注: panel_current_box_ 加入 QTabWidget (panel_task_tab_) 在下方, 不直接 addWidget 到 root
 
     // ====== 中间 split: 左 sub-task 列表 + 右 实时 log ======
     panel_splitter_ = new QSplitter(Qt::Orientation::Horizontal);
@@ -1025,6 +1040,19 @@ void AbMainWindow::onOutput(const QString& task_name, const QString& line) {
     else if (ll.contains("warning")) level = "warn";
     else if (line.contains("✓") || ll.contains("[ok]")) level = "ok";
 
+    // 2026-09-16 v10: 同步写 /tmp/ab-session.log (跟 log() 一样的 fallback, 跟 panel_log_view_ 互不干扰)
+    //   用户反馈"实时 log 没输出" - 实际 panel_log_view_ 有内容, 但 /tmp/ab-session.log 里看不到
+    //   sub-task cmd 输出 / ✓/✗ 标记 / ▶▶▶ desc 都走 onOutput, 现在也写到文件
+    {
+        FILE* fp = std::fopen("/tmp/ab-session.log", "a");
+        if (fp) {
+            std::fprintf(fp, "[%s] [%s] %s\n", level.toUtf8().constData(),
+                         task_name.toUtf8().constData(), line.toUtf8().constData());
+            std::fflush(fp);
+            std::fclose(fp);
+        }
+    }
+
     // 2026-09-16 v3: 写入中央面板右侧 log (主路径)
     if (panel_log_view_) {
         // 颜色标记 (▶▶▶ / ✓ / ✗ / 🚀)
@@ -1508,7 +1536,29 @@ void AbMainWindow::onQuit() {
 }
 
 void AbMainWindow::log(const QString& level, const QString& msg) {
-    // 2026-09-16 v3: log dock 已移除, 仅写到状态栏
+    // 2026-09-16 v7: 三路同步写, 确保 GUI/offscreen/headless 用户都能看到完整日志
+    //   1) stderr: 终端跑 `ab` 时直接看 (带 fflush, SIGTERM 也不丢)
+    //   2) 状态栏: GUI 模式下右下角状态条
+    //   3) 文件 /tmp/ab-session.log: 兜底, GUI 脱离终端 / 重定向丢了也能 tail 看
+    const char* lvl = level.toUtf8().constData();
+    const char* m_str = msg.toUtf8().constData();
+    std::fprintf(stderr, "[%s] %s\n", lvl, m_str);
+    std::fflush(stderr);
+
+    // 写文件 (追加模式, 静默失败不弹错)
+    static FILE* s_log_fp = nullptr;
+    if (!s_log_fp) {
+        s_log_fp = std::fopen("/tmp/ab-session.log", "a");
+        if (s_log_fp) {
+            std::fprintf(s_log_fp, "\n===== ab session start %s =====\n",
+                         QDateTime::currentDateTime().toString(Qt::ISODate).toUtf8().constData());
+        }
+    }
+    if (s_log_fp) {
+        std::fprintf(s_log_fp, "[%s] %s\n", lvl, m_str);
+        std::fflush(s_log_fp);
+    }
+
     // 同步状态栏
     if (level == "err") {
         if (sb_left_) {

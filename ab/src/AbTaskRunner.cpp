@@ -4,6 +4,7 @@
 #include <QDebug>
 #include <QFileInfo>
 #include <QDir>
+#include <cstdio>
 
 namespace ab {
 
@@ -107,6 +108,18 @@ void AbTaskRunner::runNextSubTask() {
     // emit sub_started (idx 从 1 开始, total 是 sub-task 总数)
     emit sub_started(task_name_, sub_idx_ + 1, sub_total_, sub_desc, sub_cmd);
 
+    // 2026-09-16 v10: emit output 标记让实时 log 区立即有内容 (用户反馈"实时 log 没输出")
+    //   - 写 desc 行 → onOutput 自动按 ▶▶▶ 标蓝色
+    //   - 写 cmd 行 → 用户能 copy 调试
+    //   - 子进程 stdout 也走 onReadyRead emit output, 这俩互不干扰
+    if (!sub_desc.isEmpty()) {
+        emit output(task_name_, QString("▶▶▶ [sub %1/%2] %3").arg(sub_idx_ + 1).arg(sub_total_).arg(sub_desc));
+    } else {
+        emit output(task_name_, QString("▶▶▶ [sub %1/%2]").arg(sub_idx_ + 1).arg(sub_total_));
+    }
+    emit output(task_name_, QString("  $ %1").arg(sub_cmd));
+    emit output(task_name_, QString(""));  // 空行分割
+
     if (!proc_) {
         qWarning() << "[AbTaskRunner] proc_ is null in runNextSubTask";
         return;
@@ -167,6 +180,17 @@ void AbTaskRunner::onProcFinished(int exit_code, QProcess::ExitStatus /*status*/
         int idx1 = sub_idx_ + 1;  // 1-indexed 给 UI
         emit sub_finished(task_name_, idx1, sub_total_, exit_code, dt);
 
+        // 2026-09-16 v10: emit output 总结标记, 让实时 log 区能看到 sub-task 退出码 + 耗时
+        if (exit_code == 0) {
+            emit output(task_name_,
+                QString("✓ [sub %1/%2] 完成 (rc=0 耗时 %.2fs)")
+                    .arg(idx1).arg(sub_total_).arg(dt));
+        } else {
+            emit output(task_name_,
+                QString("✗ [sub %1/%2] 失败 (rc=%3 耗时 %.2fs)")
+                    .arg(idx1).arg(sub_total_).arg(exit_code).arg(dt));
+        }
+
         if (exit_code != 0) {
             // 失败: emit sub_failed, 然后 emit 整 task finished (rc = exit_code)
             emit sub_failed(task_name_, idx1, sub_total_);
@@ -191,6 +215,45 @@ void AbTaskRunner::onProcFinished(int exit_code, QProcess::ExitStatus /*status*/
 }
 
 void AbTaskRunner::onProcError(QProcess::ProcessError err) {
+    // 2026-09-16 v9: 输出详细错误信息 (QProcess::errorString 包含具体失败原因, 比如
+    //   "No such file or directory" / "Permission denied" / "Invalid argument" 等)
+    std::string err_str = proc_ ? proc_->errorString().toStdString() : "(proc_ null)";
+    const char* err_name = "?";
+    switch (err) {
+        case QProcess::FailedToStart: err_name = "FailedToStart"; break;
+        case QProcess::Crashed:       err_name = "Crashed"; break;
+        case QProcess::Timedout:      err_name = "Timedout"; break;
+        case QProcess::WriteError:    err_name = "WriteError"; break;
+        case QProcess::ReadError:     err_name = "ReadError"; break;
+        case QProcess::UnknownError:  err_name = "UnknownError"; break;
+    }
+    // stderr + /tmp/ab-session.log 都写 (跟 log() 一样的 fallback 机制, 让用户本地也能 grep 到)
+    fprintf(stderr,
+        "[AbTaskRunner] QProcess 错误: %s (%d) msg=\"%s\" task=%s cmd=\"%.200s\"\n",
+        err_name, static_cast<int>(err), err_str.c_str(),
+        task_name_.toUtf8().constData(),
+        (sub_idx_ < sub_cmds_.size() ? sub_cmds_[sub_idx_] : QString()).toUtf8().constData());
+    fflush(stderr);
+    {
+        FILE* fp = fopen("/tmp/ab-session.log", "a");
+        if (fp) {
+            fprintf(fp,
+                "[AbTaskRunner] QProcess 错误: %s (%d) msg=\"%s\" task=%s cmd=\"%.200s\"\n",
+                err_name, static_cast<int>(err), err_str.c_str(),
+                task_name_.toUtf8().constData(),
+                (sub_idx_ < sub_cmds_.size() ? sub_cmds_[sub_idx_] : QString()).toUtf8().constData());
+            fflush(fp);
+            fclose(fp);
+        }
+    }
+    // 2026-09-16 v10: emit output 总结让实时 log 区能看到 QProcess 错误 (用户反馈"实时 log 没输出")
+    //   注意: 在 emit error 之前调, 否则 onProcFinished 之后 sub_total_ 清 0 走单 task 分支
+    if (sub_total_ > 0) {
+        int idx1 = sub_idx_ + 1;
+        emit output(task_name_,
+            QString("✗ [sub %1/%2] QProcess %3 (msg=\"%4\")")
+                .arg(idx1).arg(sub_total_).arg(err_name).arg(QString::fromStdString(err_str)));
+    }
     emit error(task_name_, static_cast<int>(err));
     // 2026-09-16: QProcess 错误 (启动失败 / 崩溃) 也清 sub-task 模式
     if (sub_total_ > 0) {
