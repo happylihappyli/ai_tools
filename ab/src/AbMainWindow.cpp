@@ -8,6 +8,9 @@
 #include "TaskRunnerWindow.h" // 2026-09-16: 独立任务运行器窗口 (仿 ac_task_runner_gui.py)
 
 #include <QVBoxLayout>
+#include <QGuiApplication>
+#include <QScreen>
+#include <QRect>
 #include <QHBoxLayout>
 #include <QFrame>
 #include <QGroupBox>
@@ -54,7 +57,25 @@ namespace ab {
 AbMainWindow::AbMainWindow(const AbConfig& cfg, QWidget* parent)
     : QMainWindow(parent), cfg_(cfg) {
     updateWindowTitle();   // 2026-09-09: 初始窗口标题 = cfg_.title
-    resize(cfg_.window);
+    // 2026-09-16 v5: 启动时窗口宽度 = 屏幕宽度的 80%, 高度用 cfg (默认 700)
+    //   跨屏幕分辨率自动适配 (1080p / 1440p / 4K 都能 80% 填满)
+    // v7 (2026-09-16): 默认高度提到 900 (让 sub-task 列表显示 ≥5 行 + 当前执行区 + 详情 + log 都可见)
+    //   取消 setMaximumSize 锁, 允许用户拖大/最大化 (用户反馈"高度可以高一些,要可以最大化")
+    int win_w = cfg_.window.width()  > 0 ? cfg_.window.width()  : 1000;
+    int win_h = cfg_.window.height() > 0 ? cfg_.window.height() : 900;
+    if (auto* screen = QGuiApplication::primaryScreen()) {
+        const QRect avail = screen->availableGeometry();
+        win_w = int(avail.width() * 0.8);
+        // 高度不超过屏幕 95%, 避免小屏幕上超出
+        const int max_h = int(avail.height() * 0.95);
+        if (win_h > max_h) win_h = max_h;
+        // 居中显示 (比默认左上角好看)
+        move(avail.x() + (avail.width()  - win_w) / 2,
+             avail.y() + (avail.height() - win_h) / 2);
+    }
+    resize(win_w, win_h);
+    // 2026-09-16 v7: 取消 max size 锁 (允许最大化), 仅设最小尺寸防过小
+    setMinimumSize(800, 600);
 
     runner_ = new AbTaskRunner(this);
     wireRunner();
@@ -334,6 +355,56 @@ void AbMainWindow::buildCentralPanel() {
     root->setContentsMargins(8, 8, 8, 8);
     root->setSpacing(6);
 
+    // 2026-09-16 v7: 用户反馈"底部的按钮可以放到工具栏" — 把 Stop / Copy log / 打开 log /
+    //   启动 cloud_main (Vulkan/GL) 5 个按钮合并到顶部 QToolBar, 节省底部高度
+    //   让 sub-task 列表可以显示更多行
+    panel_toolbar_ = new QToolBar("操作", this);
+    panel_toolbar_->setMovable(false);
+    panel_toolbar_->setIconSize(QSize(16, 16));
+    panel_toolbar_->setStyleSheet(
+        "QToolBar { background-color: #2a2a2a; border-bottom: 1px solid #444; spacing: 4px; padding: 2px; }"
+        "QToolButton { padding: 4px 8px; border-radius: 3px; }"
+        "QToolButton:hover { background-color: #3a3a3a; }");
+
+    panel_btn_stop_ = new QPushButton("⏹ Stop");
+    panel_btn_stop_->setStyleSheet(
+        "QPushButton { background-color: #aa4444; color: #fff; padding: 4px 10px; "
+        "font-weight: bold; border-radius: 3px; }"
+        "QPushButton:disabled { background-color: #444; color: #888; }");
+    connect(panel_btn_stop_, &QPushButton::clicked, this, &AbMainWindow::onPanelStopClicked);
+    panel_toolbar_->addWidget(panel_btn_stop_);
+
+    panel_toolbar_->addSeparator();
+
+    panel_btn_copy_log_ = new QPushButton("📋 复制 log");
+    connect(panel_btn_copy_log_, &QPushButton::clicked, this, &AbMainWindow::onPanelCopyLog);
+    panel_toolbar_->addWidget(panel_btn_copy_log_);
+
+    panel_btn_open_dir_ = new QPushButton("📂 打开 log 目录");
+    connect(panel_btn_open_dir_, &QPushButton::clicked, this, &AbMainWindow::onPanelOpenLogDir);
+    panel_toolbar_->addWidget(panel_btn_open_dir_);
+
+    panel_toolbar_->addSeparator();
+
+    panel_btn_launch_cloud_ = new QPushButton("🚀 启动 cloud_main (Vulkan)");
+    panel_btn_launch_cloud_->setStyleSheet(
+        "QPushButton { background-color: #2d7d2d; color: #fff; padding: 4px 10px; "
+        "font-weight: bold; border-radius: 3px; }"
+        "QPushButton:hover { background-color: #3d9d3d; }");
+    connect(panel_btn_launch_cloud_, &QPushButton::clicked, this, [this]() { onPanelLaunchCloud(false); });
+    panel_toolbar_->addWidget(panel_btn_launch_cloud_);
+
+    panel_btn_launch_cloud_gl_ = new QPushButton("🟢 启动 cloud_main (GL)");
+    panel_btn_launch_cloud_gl_->setStyleSheet(
+        "QPushButton { background-color: #aa7d2d; color: #fff; padding: 4px 10px; "
+        "font-weight: bold; border-radius: 3px; }"
+        "QPushButton:hover { background-color: #c8902d; }");
+    connect(panel_btn_launch_cloud_gl_, &QPushButton::clicked, this, [this]() { onPanelLaunchCloud(true); });
+    panel_toolbar_->addWidget(panel_btn_launch_cloud_gl_);
+
+    // 2026-09-16 v7: QToolBar 加到主窗口顶部 (header 上方)
+    addToolBar(Qt::TopToolBarArea, panel_toolbar_);
+
     // ====== 顶部 header: 任务名 + status badge + elapsed ======
     QFrame* header_ = new QFrame();
     header_->setFrameShape(QFrame::Shape::StyledPanel);
@@ -427,6 +498,10 @@ void AbMainWindow::buildCentralPanel() {
     ll->addWidget(lbl_left_title);
     panel_sub_list_ = new QListWidget();
     panel_sub_list_->setFont(QFont("monospace", 10));
+    // 2026-09-16 v7: 用户反馈"中间任务列表至少要显示 5 个任务"
+    //   minHeight = 5 行 * 28px + padding ≈ 160px, 让 sub-task 列表默认就够 5 行可见
+    //   (窗口可拉高显示更多行)
+    panel_sub_list_->setMinimumHeight(160);
     panel_sub_list_->setStyleSheet(
         "QListWidget { background-color: #1a1a1a; }"
         "QListWidget::item { padding: 4px; border-bottom: 1px solid #2a2a2a; }"
@@ -512,37 +587,9 @@ void AbMainWindow::buildCentralPanel() {
     dl->addWidget(panel_txt_detail_cmd_);
     root->addWidget(panel_detail_box_);
 
-    // ====== 底部按钮行 ======
-    QHBoxLayout* btn_row = new QHBoxLayout();
-    panel_btn_stop_ = new QPushButton("⏹ Stop (杀 task)");
-    panel_btn_stop_->setStyleSheet(
-        "QPushButton { background-color: #aa4444; color: #fff; padding: 6px 14px; "
-        "font-weight: bold; border-radius: 3px; }"
-        "QPushButton:disabled { background-color: #444; color: #888; }");
-    connect(panel_btn_stop_, &QPushButton::clicked, this, &AbMainWindow::onPanelStopClicked);
-    btn_row->addWidget(panel_btn_stop_);
-    panel_btn_copy_log_ = new QPushButton("📋 复制 log");
-    connect(panel_btn_copy_log_, &QPushButton::clicked, this, &AbMainWindow::onPanelCopyLog);
-    btn_row->addWidget(panel_btn_copy_log_);
-    panel_btn_open_dir_ = new QPushButton("📂 打开 log 目录");
-    connect(panel_btn_open_dir_, &QPushButton::clicked, this, &AbMainWindow::onPanelOpenLogDir);
-    btn_row->addWidget(panel_btn_open_dir_);
-    panel_btn_launch_cloud_ = new QPushButton("🚀 启动 cloud_main (Vulkan)");
-    panel_btn_launch_cloud_->setStyleSheet(
-        "QPushButton { background-color: #2d7d2d; color: #fff; padding: 6px 14px; "
-        "font-weight: bold; border-radius: 3px; }"
-        "QPushButton:hover { background-color: #3d9d3d; }");
-    connect(panel_btn_launch_cloud_, &QPushButton::clicked, this, [this]() { onPanelLaunchCloud(false); });
-    btn_row->addWidget(panel_btn_launch_cloud_);
-    panel_btn_launch_cloud_gl_ = new QPushButton("🟢 启动 cloud_main (GL)");
-    panel_btn_launch_cloud_gl_->setStyleSheet(
-        "QPushButton { background-color: #aa7d2d; color: #fff; padding: 6px 14px; "
-        "font-weight: bold; border-radius: 3px; }"
-        "QPushButton:hover { background-color: #c8902d; }");
-    connect(panel_btn_launch_cloud_gl_, &QPushButton::clicked, this, [this]() { onPanelLaunchCloud(true); });
-    btn_row->addWidget(panel_btn_launch_cloud_gl_);
-    btn_row->addStretch();
-    root->addLayout(btn_row);
+    // 2026-09-16 v7: 底部按钮行已移至顶部 QToolBar (panel_toolbar_), 这里只留 stretch
+    //   让详情区不会把 log 区挤掉
+    root->addStretch();
 
     // ====== 计时器 ======
     panel_elapsed_timer_ = new QTimer(this);
@@ -1012,7 +1059,7 @@ void AbMainWindow::onOutput(const QString& task_name, const QString& line) {
 
 void AbMainWindow::onFinished(const QString& task_name, int exit_code, double elapsed) {
     log(exit_code == 0 ? "ok" : "err",
-        QString("[%1] 退出码 %2  耗时 %.1fs").arg(task_name).arg(exit_code).arg(elapsed));
+        QString("[%1] 退出码 %2  耗时 %3s").arg(task_name).arg(exit_code).arg(elapsed, 0, 'f', 1));
 
     // 2026-09-16 v3: 更新中央面板顶部状态 (status badge + elapsed 停 + 进度条满)
     if (panel_lbl_status_) {

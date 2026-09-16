@@ -172,7 +172,9 @@ private:
     QPushButton* panel_btn_open_sub_log_ = nullptr;
     QPushButton* panel_btn_copy_sub_cmd_ = nullptr;
     QPlainTextEdit* panel_txt_detail_cmd_ = nullptr;
-    // 底部按钮行
+    // 顶部工具栏 (2026-09-16 v7: 5 个按钮合并到这里, 不再占底部空间)
+    QToolBar*    panel_toolbar_      = nullptr;
+    // 顶部工具栏按钮
     QPushButton* panel_btn_stop_      = nullptr;
     QPushButton* panel_btn_copy_log_  = nullptr;
     QPushButton* panel_btn_open_dir_  = nullptr;
