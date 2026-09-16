@@ -101,6 +101,39 @@ APP_NAME = "ac GUI — AI 编译启动器"
 APP_VERSION = "1.0.0"
 APP_ORG = "ai_tools"
 
+# 2026-09-15 fix41m: ac GUI 工具栏按钮 SVG 图标
+#   之前所有 QAction 只有文字没图标, 看起来跟 Qt 默认应用一样, 不专业.
+#   修法: 12 个 Material Icons 简化版 SVG 放到 ai_tools/icons/, ac GUI 用 _icon() helper
+#         加载, 自动 fallback 到 None (找不到 SVG 时 Qt 显示纯文字按钮, 不崩).
+#   路径: /home/bv/code/ai_tools/icons/<name>.svg (24x24 stroke="currentColor")
+#   加新按钮: 把 <name>.svg 放到 icons/ 目录 + 调 _icon("<name>") 即可.
+ICONS_DIR = Path(__file__).parent / "icons"
+
+
+def _icon(name: str):
+    """加载 SVG 图标, 失败返回 None (Qt 显示纯文字按钮)
+
+    2026-09-15 fix41m: 集中 SVG 加载逻辑, 不要在每个按钮复制 QIcon 构造.
+    PyQt6 / PySide6 QIcon 自动识别 SVG (不用显式 import QSvgWidget).
+    """
+    if not name:
+        return None
+    svg_path = ICONS_DIR / f"{name}.svg"
+    if not svg_path.is_file():
+        return None
+    try:
+        from _qt_compat import QIcon
+        return QIcon(str(svg_path))
+    except Exception:
+        return None
+
+
+def set_action_icon(action, name: str):
+    """给 QAction 设图标 (失败静默回退 None) — 避免每个按钮写 try/except"""
+    icon = _icon(name)
+    if icon is not None:
+        action.setIcon(icon)
+
 
 def load_ai_build():
     """加载 ai_build.json"""
@@ -313,12 +346,19 @@ class AcMainWindow(QMainWindow):
         self._btn_stop = QPushButton("■ 停止 (F7)")
         self._btn_auto = QPushButton("⚡ 跑 Auto 链 (F6)")
         self._btn_run_cloud = QPushButton("🚀 启动 cloud_main (Ctrl+R)")
+        self._btn_run_cloud.setToolTip("以默认 Vulkan/Forward+ 模式启动")
         self._btn_stop.setEnabled(False)
         self._btn_run_cloud.setEnabled(False)  # 编译成功后启用
+
+        self._btn_run_cloud_gl = QPushButton("🟢 启动兼容模式 (OpenGL)")
+        self._btn_run_cloud_gl.setToolTip("以 OpenGL 兼容模式启动 (解决 Forward+ 的黑屏/花屏问题)")
+        self._btn_run_cloud_gl.setEnabled(False)
+
         ctrl_row.addWidget(self._btn_run)
         ctrl_row.addWidget(self._btn_stop)
         ctrl_row.addWidget(self._btn_auto)
         ctrl_row.addWidget(self._btn_run_cloud)
+        ctrl_row.addWidget(self._btn_run_cloud_gl)
         ctrl_row.addStretch(1)
         task_root.addLayout(ctrl_row)
 
@@ -450,6 +490,7 @@ class AcMainWindow(QMainWindow):
         self._btn_auto.clicked.connect(self.on_run_auto)
         self._btn_stop.clicked.connect(self.on_stop)
         self._btn_run_cloud.clicked.connect(self.on_run_cloud_main)
+        self._btn_run_cloud_gl.clicked.connect(self.on_run_cloud_main_gl)
         # 项目 tab 工具按钮
         self._btn_ght.clicked.connect(self.on_open_ght)
         self._btn_tts.clicked.connect(self.on_tts_prompt)
@@ -477,43 +518,63 @@ class AcMainWindow(QMainWindow):
     def _build_actions(self):
         self.act_run_selected = QAction("跑选中任务", self)
         self.act_run_selected.setShortcut(QKeySequence("F5"))
+        set_action_icon(self.act_run_selected, "play")
         self.act_run_selected.triggered.connect(self.on_run_selected)
 
         self.act_run_auto = QAction("跑 Auto 链", self)
         self.act_run_auto.setShortcut(QKeySequence("F6"))
+        set_action_icon(self.act_run_auto, "link")
         self.act_run_auto.triggered.connect(self.on_run_auto)
 
         self.act_stop = QAction("停止", self)
         self.act_stop.setShortcut(QKeySequence("F7"))
+        set_action_icon(self.act_stop, "stop")
         self.act_stop.triggered.connect(self.on_stop)
 
         self.act_open_ght = QAction("GitHub Token 管理...", self)
         self.act_open_ght.setShortcut(QKeySequence("Ctrl+G"))
+        set_action_icon(self.act_open_ght, "key")
         self.act_open_ght.triggered.connect(self.on_open_ght)
 
         self.act_tts = QAction("TTS 播报...", self)
         self.act_tts.setShortcut(QKeySequence("Ctrl+T"))
+        set_action_icon(self.act_tts, "speaker")
         self.act_tts.triggered.connect(self.on_tts_prompt)
 
         self.act_bak = QAction("备份当前项目...", self)
         self.act_bak.setShortcut(QKeySequence("Ctrl+B"))
+        set_action_icon(self.act_bak, "save")
         self.act_bak.triggered.connect(self.on_bak_project)
 
         # 启动 cloud_main (编译成功后启用)
         self.act_run_cloud = QAction("🚀 启动 cloud_main", self)
         self.act_run_cloud.setShortcut(QKeySequence("Ctrl+R"))
+        set_action_icon(self.act_run_cloud, "rocket")
         self.act_run_cloud.setEnabled(False)  # 编译成功后才启用
         self.act_run_cloud.triggered.connect(self.on_run_cloud_main)
 
+        self.act_run_cloud_gl = QAction("🟢 启动兼容模式 (OpenGL)", self)
+        self.act_run_cloud_gl.setShortcut(QKeySequence("Ctrl+Shift+G"))
+        set_action_icon(self.act_run_cloud_gl, "rocket")
+        self.act_run_cloud_gl.setEnabled(False)
+        self.act_run_cloud_gl.triggered.connect(self.on_run_cloud_main_gl)
+
         # 编译+启动 一气呵成
-        self.act_build_and_run = QAction("⚡ 编译并启动 cloud_main", self)
+        self.act_build_and_run = QAction("⚡ 编译并启动 (Vulkan)", self)
         self.act_build_and_run.setShortcut(QKeySequence("Ctrl+Shift+R"))
+        set_action_icon(self.act_build_and_run, "build_rocket")
         self.act_build_and_run.triggered.connect(self.on_build_and_run)
+
+        self.act_build_and_run_gl = QAction("⚡ 编译并启动 (OpenGL)", self)
+        self.act_build_and_run_gl.setShortcut(QKeySequence("Ctrl+Shift+E"))
+        set_action_icon(self.act_build_and_run_gl, "build_rocket")
+        self.act_build_and_run_gl.triggered.connect(self.on_build_and_run_gl)
 
         self.act_toggle_log = QAction("显示日志面板", self)
         self.act_toggle_log.setCheckable(True)
         self.act_toggle_log.setChecked(False)
         self.act_toggle_log.setShortcut(QKeySequence("Ctrl+L"))
+        set_action_icon(self.act_toggle_log, "log")
         self.act_toggle_log.toggled.connect(self.on_toggle_log)
 
         # 主题切换 (动态生成, 根据 ac_themes.THEMES 决定)
@@ -527,14 +588,17 @@ class AcMainWindow(QMainWindow):
 
         self.act_help_setup = QAction("设置指南 (GitHub Token)...", self)
         self.act_help_setup.setShortcut(QKeySequence("F1"))
+        set_action_icon(self.act_help_setup, "help")
         self.act_help_setup.triggered.connect(self.on_help_setup)
 
         self.act_help_about = QAction("关于...", self)
         self.act_help_about.setShortcut(QKeySequence("Ctrl+,"))
+        set_action_icon(self.act_help_about, "info")
         self.act_help_about.triggered.connect(self.on_about)
 
         self.act_quit = QAction("退出", self)
         self.act_quit.setShortcut(QKeySequence("Ctrl+Q"))
+        set_action_icon(self.act_quit, "power")
         self.act_quit.triggered.connect(self.close)
 
     def _build_menu(self):
@@ -550,7 +614,9 @@ class AcMainWindow(QMainWindow):
         m_run.addAction(self.act_stop)
         m_run.addSeparator()
         m_run.addAction(self.act_run_cloud)
+        m_run.addAction(self.act_run_cloud_gl)
         m_run.addAction(self.act_build_and_run)
+        m_run.addAction(self.act_build_and_run_gl)
 
         m_tools = mb.addMenu("工具(&T)")
         m_tools.addAction(self.act_open_ght)
@@ -580,7 +646,9 @@ class AcMainWindow(QMainWindow):
         tb.addAction(self.act_stop)
         tb.addSeparator()
         tb.addAction(self.act_run_cloud)
+        tb.addAction(self.act_run_cloud_gl)
         tb.addAction(self.act_build_and_run)
+        tb.addAction(self.act_build_and_run_gl)
         tb.addSeparator()
         tb.addAction(self.act_open_ght)
         tb.addAction(self.act_tts)
@@ -756,7 +824,9 @@ class AcMainWindow(QMainWindow):
         if binary:
             self._cloud_main_binary = binary
             self.act_run_cloud.setEnabled(True)
+            self.act_run_cloud_gl.setEnabled(True)
             self._btn_run_cloud.setEnabled(True)
+            self._btn_run_cloud_gl.setEnabled(True)
             self._log("ok", f"✓ cloud_main 已就绪: {binary.relative_to(Path(PROJECT_DIR))}")
             # 状态栏右侧更新
             if hasattr(self, "_sb_right"):
@@ -767,44 +837,74 @@ class AcMainWindow(QMainWindow):
             self._log("warn", "✗ 编译后没找到 bin/Debug/cloud_main")
 
     def on_run_cloud_main(self):
-        """启动 cloud_main (前台, 阻塞当前进程直到退出)"""
-        if not getattr(self, "_cloud_main_binary", None):
-            binary = self._find_cloud_main_binary()
-            if not binary:
-                QMessageBox.warning(
-                    self, "未找到",
-                    f"bin/Debug/cloud_main 不存在\n请先跑 'build+deploy' 编译"
-                )
-                return
-            self._cloud_main_binary = binary
-        self._log("task", f"🚀 启动 cloud_main: {self._cloud_main_binary}")
-        self._log("info", "参数: --rendering-driver vulkan --rendering-method forward_plus")
+        """启动 cloud_main (2026-09-15 fix41k: 调 start_cloud_main.sh 单一入口, 永不漂移)
+
+        之前 fix41e/h/i/j 修了 env drift + cmdline drift, 但本质问题是"4 个入口各自复制 Popen 命令".
+        修法: 全部入口 (ac auto / ac ar / ac_gui.py Ctrl+R / run_start_cloud_main_only.py /
+        cmd_launch_cloud_main) 调同一个 start_cloud_main.sh, .sh 接管 env/cwd/args.
+        """
+        from pathlib import Path
+        sh_path = Path("/home/bv/code/godot_ui_linux/start_cloud_main.sh")
+        if not sh_path.is_file():
+            QMessageBox.warning(
+                self, "未找到",
+                f"start_cloud_main.sh 不存在: {sh_path}\n请确认文件存在并有执行权限"
+            )
+            return
+        self._log("task", f"🚀 启动 cloud_main (fix41k: 调 start_cloud_main.sh 单一入口)")
+        self._log("info", f".sh: {sh_path} (接管 env/cwd/args, 跟 ac auto + ac ar 同源)")
         tts_async("启动 cloud_main")
         try:
+            # 2026-09-15 fix41k: 调 .sh 唯一入口, 不再 Popen binary
             # 前台跑 (阻塞, 用户能看到 cloud_main 窗口). 用 subprocess.run 同步.
-            # 传 env: 让用户本地默认 wayland + nvidia vulkan
-            env = os.environ.copy()
-            env.setdefault("VK_ICD_FILENAMES", "/usr/share/vulkan/icd.d/nvidia_icd.json")
             result = subprocess.run(
-                [str(self._cloud_main_binary),
-                 "--rendering-driver", "vulkan",
-                 "--rendering-method", "forward_plus"],
-                cwd=PROJECT_DIR,
-                env=env,
+                ["setsid", "nohup", "bash", str(sh_path)],
             )
             self._log("ok" if result.returncode == 0 else "err",
-                      f"cloud_main 退出 (rc={result.returncode})")
+                      f"start_cloud_main.sh 退出 (rc={result.returncode})")
         except Exception as e:
             self._log("err", f"启动 cloud_main 失败: {e}")
             QMessageBox.critical(self, "启动失败", str(e))
 
+    def on_run_cloud_main_gl(self):
+        """启动 cloud_main 兼容模式 (传入 --gl 给 start_cloud_main.sh)"""
+        from pathlib import Path
+        sh_path = Path("/home/bv/code/godot_ui_linux/start_cloud_main.sh")
+        if not sh_path.is_file():
+            QMessageBox.warning(
+                self, "未找到",
+                f"start_cloud_main.sh 不存在: {sh_path}\n请确认文件存在并有执行权限"
+            )
+            return
+        self._log("task", f"🟢 启动 cloud_main (OpenGL 兼容模式)")
+        tts_async("启动兼容模式")
+        try:
+            result = subprocess.run(
+                ["setsid", "nohup", "bash", str(sh_path), "--gl"],
+            )
+            self._log("ok" if result.returncode == 0 else "err",
+                      f"start_cloud_main.sh 退出 (rc={result.returncode})")
+        except Exception as e:
+            self._log("err", f"启动兼容模式失败: {e}")
+            QMessageBox.critical(self, "启动失败", str(e))
+
     def on_build_and_run(self):
         """编译 + 启动 cloud_main 一气呵成"""
-        self._log("task", "⚡ 编译并启动 cloud_main")
+        self._log("task", "⚡ 编译并启动 cloud_main (Vulkan)")
         # 复用 build+deploy 任务链, 完后回调启动
         def _after_build():
             if self._find_cloud_main_binary():
                 self.on_run_cloud_main()
+            else:
+                self._log("err", "编译完成但没找到 cloud_main 二进制")
+        self._run_task("build+deploy", on_done=_after_build)
+
+    def on_build_and_run_gl(self):
+        """编译 + 启动 cloud_main (OpenGL)"""
+        self._log("task", "⚡ 编译并启动 cloud_main (OpenGL)")
+        def _after_build():
+            if self._find_cloud_main_binary():
+                self.on_run_cloud_main_gl()
             else:
                 self._log("err", "编译完成但没找到 cloud_main 二进制")
         self._run_task("build+deploy", on_done=_after_build)

@@ -2,6 +2,8 @@
 // 2026-09-02: 新增
 #include "AbTaskInspector.h"
 
+#include <QListWidget>  // 2026-09-16 v3: sub-task 列表
+#include <QProgressBar> // 2026-09-16 v3: sub-task 进度条
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -99,6 +101,34 @@ void AbTaskInspector::buildUi() {
     proc_tree_->setColumnWidth(4, 60);
     connect(proc_tree_, &QTreeWidget::itemDoubleClicked, this, &AbTaskInspector::onItemDoubleClicked);
     tabs_->addTab(proc_tree_, "⚙️ 进程");
+
+    // -- 2026-09-16 v3: sub-task tab --
+    sub_task_panel_ = new QWidget();
+    QVBoxLayout* sub_vl = new QVBoxLayout(sub_task_panel_);
+    sub_vl->setContentsMargins(8, 8, 8, 8);
+    sub_vl->setSpacing(4);
+
+    sub_task_title_ = new QLabel("⏸ 暂无任务在跑");
+    sub_task_title_->setStyleSheet("color: #88ccff; font-size: 12px; font-weight: bold;");
+    sub_vl->addWidget(sub_task_title_);
+
+    sub_task_prog_ = new QProgressBar();
+    sub_task_prog_->setRange(0, 1);  // 防止 0/0 显示异常
+    sub_task_prog_->setValue(0);
+    sub_task_prog_->setFormat("%v / %m  (sub-task)");
+    sub_task_prog_->setFixedHeight(16);
+    sub_vl->addWidget(sub_task_prog_);
+
+    sub_task_list_ = new QListWidget();
+    sub_task_list_->setAlternatingRowColors(true);
+    sub_task_list_->setWordWrap(true);  // sub-task desc 可能很长, 自动换行
+    sub_vl->addWidget(sub_task_list_, 1);
+
+    sub_task_info_ = new QLabel("");
+    sub_task_info_->setStyleSheet("color: #888; font-size: 11px;");
+    sub_vl->addWidget(sub_task_info_);
+
+    tabs_->addTab(sub_task_panel_, "📊 sub-task");
 
     vl->addWidget(tabs_, 1);
     setWidget(w);
@@ -374,6 +404,171 @@ void AbTaskInspector::onItemDoubleClicked(QTreeWidgetItem* it, int /*col*/) {
         if (ret == QMessageBox::Yes) {
             killProcess(pid);
         }
+    }
+}
+
+// =====================================================================
+// 2026-09-16 v3: sub-task 处理 (从 MainWindow 通过 runner_ 的信号转过来)
+//   目标: sub-task tab 显示当前 task 的所有 sub-task, 实时更新状态
+// =====================================================================
+bool AbTaskInspector::findTaskSubLists(const QString& task_name,
+                                       QStringList& out_cmds,
+                                       QStringList& out_descs) const {
+    for (const auto& t : cfg_.tasks) {
+        if (t.name == task_name) {
+            // 优先 sub-task list, 缺省 fallback 到老格式
+            if (!t.sub_cmds.isEmpty()) {
+                out_cmds  = t.sub_cmds;
+                out_descs = t.sub_descs;
+                return true;
+            }
+            if (!t.cmd.isEmpty()) {
+                out_cmds  = QStringList{t.cmd};
+                out_descs = QStringList{QString()};
+                return true;
+            }
+            return false;
+        }
+    }
+    return false;
+}
+
+void AbTaskInspector::switchToSubTaskTab(const QString& task_name) {
+    if (!sub_task_panel_ || !tabs_) return;
+    // 切到 sub-task tab
+    int idx = tabs_->indexOf(sub_task_panel_);
+    if (idx >= 0) tabs_->setCurrentIndex(idx);
+    if (sub_task_title_) {
+        sub_task_title_->setText(QString("🔧 %1 (%2 sub-task%3)")
+            .arg(task_name)
+            .arg(current_sub_states_.size())
+            .arg(current_sub_states_.size() > 1 ? "s" : ""));
+        sub_task_title_->setStyleSheet("color: #88ccff; font-size: 12px; font-weight: bold;");
+    }
+    if (sub_task_prog_) {
+        sub_task_prog_->setRange(0, current_sub_states_.size());
+        sub_task_prog_->setValue(0);
+    }
+    if (sub_task_list_) sub_task_list_->clear();
+    if (sub_task_info_) sub_task_info_->setText("进度: 0 / " + QString::number(current_sub_states_.size()));
+    sub_item_by_idx_.clear();
+}
+
+void AbTaskInspector::onTaskSubStarted(const QString& task_name,
+                                       int idx, int total,
+                                       const QString& desc, const QString& cmd) {
+    current_subtask_task_ = task_name;
+
+    // 第一次 sub_started (idx == 1) 时清空 + 预填所有 sub-task
+    if (idx == 1) {
+        current_sub_states_.clear();
+        QStringList cmds, descs;
+        if (findTaskSubLists(task_name, cmds, descs)) {
+            for (int i = 0; i < cmds.size(); ++i) {
+                SubTaskState s;
+                s.idx = i + 1;
+                s.desc = (i < descs.size()) ? descs[i] : QString();
+                s.cmd = cmds[i];
+                s.status = "pending";
+                current_sub_states_.append(s);
+            }
+        } else {
+            // cfg_ 找不到, 用 on-the-fly 至少建一个 entry (不让 UI 空)
+            SubTaskState s;
+            s.idx = idx;
+            s.desc = desc;
+            s.cmd = cmd;
+            s.status = "pending";
+            current_sub_states_.append(s);
+        }
+        switchToSubTaskTab(task_name);
+
+        // 填 list
+        if (sub_task_list_) {
+            for (const auto& s : current_sub_states_) {
+                QString label = s.desc.isEmpty()
+                                ? QString("📌 [%1/%2]  %3").arg(s.idx).arg(total).arg(s.cmd)
+                                : QString("📌 [%1/%2]  %3").arg(s.idx).arg(total).arg(s.desc);
+                QListWidgetItem* it = new QListWidgetItem(label, sub_task_list_);
+                it->setForeground(QColor("#888"));  // pending = 灰
+                // 工具用 Qt::UserRole 存 idx, 后续按 idx 改状态
+                it->setData(Qt::UserRole, s.idx);
+                sub_item_by_idx_[s.idx] = it;
+            }
+        }
+    }
+
+    // 标记当前 idx 为 running
+    if (sub_item_by_idx_.contains(idx)) {
+        QListWidgetItem* it = sub_item_by_idx_[idx];
+        const SubTaskState& s = current_sub_states_[idx - 1];
+        QString label = s.desc.isEmpty()
+                        ? QString("⟳ [%1/%2]  %3").arg(idx).arg(total).arg(s.cmd)
+                        : QString("⟳ [%1/%2]  %3").arg(idx).arg(total).arg(s.desc);
+        it->setText(label);
+        it->setForeground(QColor("#88ccff"));  // running = 蓝
+        // 高亮 + 滚动
+        if (sub_task_list_) {
+            sub_task_list_->setCurrentItem(it);
+            sub_task_list_->scrollToItem(it);
+        }
+    }
+    if (sub_task_prog_) {
+        // 进度条: 已完成 = idx - 1, 当前 = idx (显示部分填充)
+        sub_task_prog_->setValue(idx - 1);  // 让当前条还没"完成"
+    }
+    if (sub_task_info_) {
+        sub_task_info_->setText(QString("进度: %1 / %2  ·  当前: %3")
+            .arg(idx - 1).arg(total).arg(desc.isEmpty() ? cmd : desc));
+    }
+}
+
+void AbTaskInspector::onTaskSubFinished(const QString& task_name,
+                                        int idx, int total,
+                                        int rc, double dt_sec) {
+    if (task_name != current_subtask_task_) return;
+    if (sub_item_by_idx_.contains(idx)) {
+        QListWidgetItem* it = sub_item_by_idx_[idx];
+        const SubTaskState& s = current_sub_states_[idx - 1];
+        QString ok_mark = (rc == 0) ? "✓" : "✗";
+        QString dt_str = QString::number(dt_sec, 'f', 1) + "s";
+        QString label = s.desc.isEmpty()
+                        ? QString("%1 [%2/%3]  %4  (%5)")
+                              .arg(ok_mark).arg(idx).arg(total).arg(s.cmd).arg(dt_str)
+                        : QString("%1 [%2/%3]  %4  (%5)")
+                              .arg(ok_mark).arg(idx).arg(total).arg(s.desc).arg(dt_str);
+        it->setText(label);
+        if (rc == 0) {
+            it->setForeground(QColor("#6a9955"));  // ok = 绿
+        } else {
+            it->setForeground(QColor("#f48771"));  // err = 红
+        }
+    }
+    // 更新状态
+    if (idx - 1 < current_sub_states_.size()) {
+        current_sub_states_[idx - 1].status = (rc == 0) ? "ok" : "err";
+        current_sub_states_[idx - 1].dt_sec = dt_sec;
+    }
+    // 进度条: 已完成
+    if (sub_task_prog_) {
+        sub_task_prog_->setValue(idx);
+    }
+    if (sub_task_info_) {
+        sub_task_info_->setText(QString("进度: %1 / %2  ·  上一步: %3s (rc=%4)")
+            .arg(idx).arg(total).arg(dt_sec, 0, 'f', 1).arg(rc));
+    }
+}
+
+void AbTaskInspector::onTaskSubFailed(const QString& task_name,
+                                      int idx, int total) {
+    if (task_name != current_subtask_task_) return;
+    if (sub_task_title_) {
+        sub_task_title_->setText(QString("✗✗ %1  (第 %3/%4 步失败, 后续不跑)")
+            .arg(task_name).arg(idx).arg(total));
+        sub_task_title_->setStyleSheet("color: #f48771; font-size: 12px; font-weight: bold;");
+    }
+    if (sub_task_info_) {
+        sub_task_info_->setText(QString("✗ 失败: 第 %1/%2 步 → 后续 sub-task 跳过").arg(idx).arg(total));
     }
 }
 

@@ -76,8 +76,13 @@ struct AbConfig {
     // 任务列表
     struct Task {
         QString name;
-        QString cmd;
+        QString cmd;                // 单 cmd 模式 (向后兼容)
         QString description;
+        // 2026-09-16 新增: sub-task list 模式 (串行跑多 cmd, 每 cmd 可有中文说明)
+        //   当 cmd 是 ai_build.json 里的 list[dict{desc, cmd}] 时, 填这两个 list
+        //   优先 sub_cmds/sub_descs, 单 cmd 字段 (老 API) 为空时 fallback
+        QStringList sub_cmds;       // 多 cmd 串行跑
+        QStringList sub_descs;      // 每 cmd 中文说明 (跟 sub_cmds 等长)
     };
     std::vector<Task> tasks;
 

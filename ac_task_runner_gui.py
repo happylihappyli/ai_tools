@@ -35,27 +35,44 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-# 防止无 PyQt6 环境崩
+# 防止无 Qt 环境崩 (兼容 PySide6 / PyQt5 / PyQt6 — 优先用 _qt_compat 自动选)
 try:
-    from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-    from PyQt6.QtGui import (
-        QColor, QFont, QTextCursor, QIcon, QAction, QKeySequence,
-    )
-    from PyQt6.QtWidgets import (
+    from _qt_compat import (
+        QtCore, QtWidgets, QtGui,
+        Qt, QThread, QTimer, QProcess, Signal,
+        QColor, QFont, QTextCursor, QKeySequence,
         QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
         QListWidget, QListWidgetItem, QPlainTextEdit, QStatusBar, QPushButton,
         QLabel, QProgressBar, QToolBar, QFileDialog, QMessageBox,
         QGroupBox, QFrame, QSizePolicy,
     )
-    HAS_PYQT6 = True
-except ImportError:
-    HAS_PYQT6 = False
+    HAS_QT = True
+except Exception:
+    # Fallback: 直接 import PyQt6 (用户机器装了就走)
+    try:
+        from PyQt6.QtCore import Qt, QThread, pyqtSignal as Signal, QTimer, QProcess
+        from PyQt6.QtGui import (
+            QColor, QFont, QTextCursor, QIcon, QAction, QKeySequence,
+        )
+        from PyQt6.QtWidgets import (
+            QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
+            QListWidget, QListWidgetItem, QPlainTextEdit, QStatusBar, QPushButton,
+            QLabel, QProgressBar, QToolBar, QFileDialog, QMessageBox,
+            QGroupBox, QFrame, QSizePolicy,
+        )
+        HAS_QT = True
+    except ImportError:
+        HAS_QT = False
 
 TASK_LOG_ROOT = Path("/tmp/ac_task_logs")
 
 # ac stdout 解析正则
 RE_TASK_START = re.compile(r"🚀 task=(\S+) \| sub-task 总数: (\d+)")
-RE_SUB_START = re.compile(r"▶▶▶ sub-task \[(\d+)/(\d+)\]  cmd: (.*)")
+# 2026-09-16 升级: 支持两种格式
+#   旧: "▶▶▶ sub-task [1/10]  cmd: xxx"
+#   新: "▶▶▶ sub-task [1/10]  📌 STEP 1/7 清理 sconsign 缓存..."
+#   后面都跟一行 "   cmd: xxx" (80 字符截断版)
+RE_SUB_START = re.compile(r"▶▶▶ sub-task \[(\d+)/(\d+)\]\s+(?:📌\s+(.+)|cmd:\s+(.+))")
 RE_SUB_DONE = re.compile(r"([✓✗]) sub-task \[(\d+)/(\d+)\] 完成 rc=(-?\d+)  \((\d+\.?\d*)s\)")
 RE_SUB_FAIL = re.compile(r"✗✗✗ sub-task \[(\d+)/(\d+)\] 失败, 停止后续 sub-task")
 RE_TASK_DONE = re.compile(r"([✓✗]) task=(\S+) 完成 rc=(-?\d+)  \((\d+)/(\d+) sub-task\)")
@@ -88,7 +105,8 @@ class AcRunner(QThread):
     """在后台线程跑 `ac --task <name> --cli`, 实时 emit 输出行和 sub-task 事件"""
     line_received = pyqtSignal(str)          # 每行 stdout
     task_started = pyqtSignal(str, int)      # (task_name, total_sub)
-    sub_started = pyqtSignal(int, int, str, str)  # (idx, total, cmd, log_path)
+    # 2026-09-16 升级: 加 desc 字段 (中文说明), 让 UI 优先显示 desc 而不是 cmd
+    sub_started = pyqtSignal(int, int, str, str, str)  # (idx, total, cmd, log_path, desc)
     sub_done = pyqtSignal(int, int, int, float)   # (idx, total, rc, dt_sec)
     sub_failed = pyqtSignal(int, int)        # (idx, total) 失败停止信号
     task_finished = pyqtSignal(int)          # 进程 rc
@@ -150,10 +168,19 @@ class AcRunner(QThread):
                 if m:
                     idx = int(m.group(1))
                     total = int(m.group(2))
-                    cmd = m.group(3)
+                    # 2026-09-16 升级: group(3) 是 📌 desc (新格式), group(4) 是 cmd (旧格式)
+                    desc_or_cmd = m.group(3) if m.group(3) else m.group(4)
+                    # 新格式: "▶▶▶ sub-task [1/10]  📌 中文 desc" → 整行是 desc, 没 cmd 在这一行
+                    # 旧格式: "▶▶▶ sub-task [1/10]  cmd: xxx" → group(4) 是 cmd
+                    if m.group(3):  # 新格式 (📌 desc)
+                        cmd_initial = ""  # cmd 还没拿到, 等下一行 "   cmd: ..."
+                        desc = desc_or_cmd
+                    else:  # 旧格式 (cmd:)
+                        cmd_initial = desc_or_cmd
+                        desc = ""
                     # 2026-09-10 改: cmd 是 stdout 截断的 80 字符版本, 缓存 _pending_sub
-                    # 等下面两行 (log: + cmd_full:) 补充完整信息再 emit
-                    self._pending_sub = {"idx": idx, "total": total, "cmd": cmd, "log_path": "", "cmd_full": ""}
+                    # 等下面 (log: + cmd_full: + cmd:) 补充完整信息再 emit
+                    self._pending_sub = {"idx": idx, "total": total, "cmd": cmd_initial, "log_path": "", "cmd_full": "", "desc": desc}
                     self._sub_idx = idx
                     continue
                 # 匹配 "   log: /tmp/..." 行 → 缓存 log_path
@@ -161,14 +188,19 @@ class AcRunner(QThread):
                 if m_log and self._pending_sub:
                     self._pending_sub["log_path"] = m_log.group(1)
                     continue
+                # 匹配 "   cmd: <80 字符截断>" 行 (新格式的 sub-task desc 后面跟的 cmd)
+                m_cmd_short = re.search(r"^\s*cmd:\s*(.+)$", line)
+                if m_cmd_short and self._pending_sub and not self._pending_sub.get("cmd"):
+                    self._pending_sub["cmd"] = m_cmd_short.group(1).strip()
+                    continue
                 # 2026-09-10 新增: 匹配 "   📋 cmd_full: <完整>" 行 → 拿完整 cmd
                 m_cmd_full = re.search(r"^\s*📋\s*cmd_full:\s*(.+)$", line)
                 if m_cmd_full and self._pending_sub:
                     self._pending_sub["cmd_full"] = m_cmd_full.group(1).strip()
-                    # 三行都齐了 (log + cmd_full) → emit sub_started
+                    # 三行都齐了 (log + cmd_full + cmd) → emit sub_started
                     p = self._pending_sub
                     final_cmd = p["cmd_full"] if p["cmd_full"] else p["cmd"]
-                    self.sub_started.emit(p["idx"], p["total"], final_cmd, p["log_path"])
+                    self.sub_started.emit(p["idx"], p["total"], final_cmd, p["log_path"], p["desc"])
                     self._pending_sub = None
                     continue
                 m = RE_SUB_DONE.search(line)
@@ -211,7 +243,8 @@ class RunnerWindow(QMainWindow):
         super().__init__()
         self.task_name = task_name
         self.ac_args = ac_args or []
-        self._sub_states = {}  # idx -> {rc, dt, cmd, status}
+        # 2026-09-16 升级: 加 desc 字段 (中文说明)
+        self._sub_states = {}  # idx -> {rc, dt, cmd, desc, status}
         self._total = 0
         self._task_rc = None
         self._task_start_ts = time.time()
@@ -399,9 +432,25 @@ class RunnerWindow(QMainWindow):
         self.btn_copy = QPushButton("📋 复制 log")
         self.btn_copy.clicked.connect(self._on_copy)
         btn_row.addWidget(self.btn_copy)
-        self.btn_open_dir = QPushButton("📂 打开 log 目录")
+        self.btn_open_dir = QPushButton("�� 打开 log 目录")
         self.btn_open_dir.clicked.connect(self._on_open_dir)
         btn_row.addWidget(self.btn_open_dir)
+        # 2026-09-16: 加 �� 启动 cloud_main 按钮 — 直接跑编好的 binary (Vulkan+Wayland), 不走 ac
+        #   路径: /home/bv/code/godot_ui_linux/godot-ui-standalone-skia/bin/Debug/cloud_main
+        #   强制 Vulkan + Wayland (按 .trae/rules/godot_vulkan.md)
+        self.btn_launch_cloud = QPushButton("�� 启动 cloud_main")
+        self.btn_launch_cloud.setStyleSheet(
+            "QPushButton { background-color: #2d7d2d; color: #fff; padding: 6px 14px; "
+            "font-weight: bold; border-radius: 3px; }"
+            "QPushButton:hover { background-color: #3d9d3d; }"
+            "QPushButton:disabled { background-color: #444; color: #888; }"
+        )
+        self.btn_launch_cloud.setToolTip(
+            "直接启动 bin/Debug/cloud_main (Vulkan + Wayland)\n"
+            "适用于: ac task 跑完后看 3D 区域 + FPS Overlay + panel 拖动效果"
+        )
+        self.btn_launch_cloud.clicked.connect(self._on_launch_cloud_main)
+        btn_row.addWidget(self.btn_launch_cloud)
         btn_row.addStretch()
         self.lbl_elapsed = QLabel("⏱ 00:00")
         self.lbl_elapsed.setFont(QFont("monospace", 11))
@@ -516,27 +565,31 @@ class RunnerWindow(QMainWindow):
         # 预填 sub-task 占位
         self.sub_list.clear()
         for i in range(1, total + 1):
-            self._sub_states[i] = {"rc": None, "dt": 0, "cmd": "", "status": "pending"}
+            # 2026-09-16 升级: 加 desc 字段 (中文说明)
+            self._sub_states[i] = {"rc": None, "dt": 0, "cmd": "", "desc": "", "status": "pending"}
             item = QListWidgetItem(f"  ⏳ [{i:>2}/{total}] 等待…")
             item.setForeground(QColor("#888888"))
             self.sub_list.addItem(item)
         self.status.showMessage(f"🚀 task={task_name} | {total} sub-task", 3000)
 
-    def _on_sub_started(self, idx: int, total: int, cmd: str, log_path: str):
+    def _on_sub_started(self, idx: int, total: int, cmd: str, log_path: str, desc: str = ""):
+        # 2026-09-16 升级: 存 desc 字段, 让 UI 优先显示中文说明
         self._sub_states[idx] = {
-            "rc": None, "dt": 0, "cmd": cmd, "log_path": log_path, "status": "running"
+            "rc": None, "dt": 0, "cmd": cmd, "desc": desc, "log_path": log_path, "status": "running"
         }
         if idx - 1 < self.sub_list.count():
-            cmd_short = cmd[:55] + ("…" if len(cmd) > 55 else "")
+            # 优先用 desc (中文说明), 没 desc 才用 cmd
+            label = desc if desc else (cmd[:55] + ("…" if len(cmd) > 55 else ""))
             item = self.sub_list.item(idx - 1)
-            item.setText(f"  ⟳ [{idx:>2}/{total}] {cmd_short}")
+            item.setText(f"  ⟳ [{idx:>2}/{total}] {label}")
             item.setForeground(QColor("#88ccff"))
-            # tooltip 显示完整命令
+            # tooltip 显示 desc + 完整命令
             log_line = f"\n📄 log: {log_path}" if log_path else ""
+            cmd_section = f"\n$ {cmd}" if cmd else ""
+            desc_section = f"\n📌 {desc}" if desc else ""
             item.setToolTip(
                 f"sub-task [{idx}/{total}]  跑中…\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"$ {cmd}{log_line}"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{desc_section}{cmd_section}{log_line}"
             )
             # 自动滚到当前
             self.sub_list.setCurrentRow(idx - 1)
@@ -548,7 +601,9 @@ class RunnerWindow(QMainWindow):
                 "background-color: #ff8800; color: #fff; padding: 2px 8px; "
                 "border-radius: 3px;"
             )
-            self.txt_current_cmd.setPlainText(cmd)
+            # 顶部当前 cmd 区: desc 优先, 没 desc 用 cmd
+            current_label = desc if desc else cmd
+            self.txt_current_cmd.setPlainText(current_label)
             self._current_cmd_start_ts = time.time()
             self.lbl_current_dt.setText("⏱ 0s")
             # 启动当前命令计时器 (每 0.5s 刷新一次)
@@ -568,20 +623,23 @@ class RunnerWindow(QMainWindow):
         if idx - 1 < self.sub_list.count():
             sym = "✓" if rc == 0 else "✗"
             color = "#88ff88" if rc == 0 else "#ff8888"
+            # 2026-09-16 升级: 优先 desc 标签, 没 desc 才截断 cmd
+            desc = self._sub_states[idx].get("desc", "")
             cmd = self._sub_states[idx]["cmd"]
-            cmd_short = cmd[:50] + ("…" if len(cmd) > 50 else "")
+            label = desc if desc else (cmd[:50] + ("…" if len(cmd) > 50 else ""))
             item = self.sub_list.item(idx - 1)
             item.setText(
-                f"  {sym} [{idx:>2}/{total}] rc={rc} {dt:.1f}s  {cmd_short}"
+                f"  {sym} [{idx:>2}/{total}] rc={rc} {dt:.1f}s  {label}"
             )
             item.setForeground(QColor(color))
-            # 2026-09-10 加: hover tooltip 显示完整命令 + log 路径
+            # tooltip 显示 desc + 完整命令 + log 路径
             log_path = self._sub_states[idx].get("log_path", "")
             log_line = f"\n📄 log: {log_path}" if log_path else ""
+            cmd_section = f"\n$ {cmd}" if cmd else ""
+            desc_section = f"\n📌 {desc}" if desc else ""
             item.setToolTip(
                 f"sub-task [{idx}/{total}]  rc={rc}  {dt:.2f}s\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"$ {cmd}{log_line}"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{desc_section}{cmd_section}{log_line}"
             )
         # 进度
         done = sum(1 for s in self._sub_states.values() if s["status"] in ("ok", "fail"))
@@ -695,6 +753,91 @@ class RunnerWindow(QMainWindow):
                 continue
         self.status.showMessage(f"⚠ 找不到文件管理器, log 目录: {d}", 5000)
 
+    def _on_launch_cloud_main(self):
+        """2026-09-16: 直接启动 cloud_main binary (Vulkan + Wayland)
+
+        按 .trae/rules/godot_vulkan.md: 强制 vulkan + forward_plus,
+        强制 Wayland (走 VK_KHR_wayland_surface native), 禁 dummy / llvmpipe.
+        用 QProcess.startDetached 启动独立子进程 (detached: 不跟 GUI runner 同生命周期).
+        """
+        cloud_main_bin = Path(
+            "/home/bv/code/godot_ui_linux/godot-ui-standalone-skia/bin/Debug/cloud_main"
+        )
+        if not cloud_main_bin.is_file():
+            self.status.showMessage(f"⚠ 找不到 {cloud_main_bin.name}", 5000)
+            QMessageBox.warning(
+                self, "启动失败",
+                f"找不到 binary:\n{cloud_main_bin}\n\n"
+                "请先跑 ac task-runner reset-and-restart-with-remote-main 编一次"
+            )
+            return
+
+        # 检查 libworkspace_v7.so 同步状态 (避免 SIGSEGV)
+        libworkspace_v7 = cloud_main_bin.parent / "libworkspace_v7.so"
+        if not libworkspace_v7.is_file():
+            self.status.showMessage(f"⚠ 找不到 libworkspace_v7.so", 5000)
+            QMessageBox.warning(
+                self, "启动失败",
+                f"找不到 libworkspace_v7.so:\n{libworkspace_v7}\n\n"
+                "请检查 workspace_v7_lib 是否同步到 bin/Debug"
+            )
+            return
+
+        # 强制 Vulkan + Wayland (按 .trae/rules/godot_vulkan.md)
+        env = {
+            **os.environ,
+            "GDK_BACKEND": "wayland",
+            "MOZ_ENABLE_WAYLAND": "1",
+            "QT_QPA_PLATFORM": "wayland",
+            "WAYLAND_DISPLAY": os.environ.get("WAYLAND_DISPLAY", "wayland-0"),
+            # Godot Vulkan 参数 — 由 binary 内部 SConstruct 写死, 这里不重复设
+            # 强制走 native vulkan 驱动 (禁 llvmpipe)
+            "VK_ICD_FILENAMES": "/usr/share/vulkan/icd.d/nvidia_icd.json",
+            "DISPLAY": os.environ.get("DISPLAY", ":0"),
+        }
+
+        # 提示用户即将启动
+        self.status.showMessage(f"🚀 启动 cloud_main 中…", 5000)
+
+        # 用 subprocess.Popen + start_new_session=True 启动独立子进程
+        #   (类似 QProcess.startDetached: 不跟 GUI runner 同 lifecycle, 关闭 GUI 不杀 cloud_main)
+        #   start_new_session=True 创建新 session, 避免 SIGINT 串扰
+        try:
+            proc = subprocess.Popen(
+                [str(cloud_main_bin)],
+                cwd=str(cloud_main_bin.parent),
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            pid = proc.pid
+            ok = True
+        except Exception as e:
+            ok = False
+            pid = -1
+            err = str(e)
+
+        if ok:
+            self.status.showMessage(f"🚀 cloud_main 已启动 (PID {pid})", 5000)
+            self.log_view.appendPlainText(
+                f"\n[GUI] 🚀 cloud_main 已启动 (PID {pid})\n"
+                f"[GUI] binary: {cloud_main_bin}\n"
+                f"[GUI] env: GDK_BACKEND=wayland, QT_QPA_PLATFORM=wayland, "
+                f"VK_ICD_FILENAMES=nvidia_icd.json\n"
+            )
+            try:
+                notify("cloud_main 启动", f"已启动 (PID {pid})", urgent=False)
+            except Exception:
+                pass
+        else:
+            self.status.showMessage(f"⚠ 启动 cloud_main 失败", 5000)
+            QMessageBox.warning(
+                self, "启动失败",
+                f"Popen 失败: {err}\n\n请检查 binary 是否可执行 / log 路径"
+            )
+
     def _show_sub_detail(self, idx: int):
         """更新底部详情区, 显示选中 sub-task 的完整命令 + log 路径"""
         if idx not in self._sub_states:
@@ -703,9 +846,10 @@ class RunnerWindow(QMainWindow):
         rc = s.get("rc")
         dt = s.get("dt", 0)
         cmd = s.get("cmd", "")
+        desc = s.get("desc", "")  # 2026-09-16 新增
         log_path = s.get("log_path", "")
         status = s.get("status", "pending")
-        # meta 行
+        # meta 行 (2026-09-16: 加 desc)
         sym = {"ok": "✓", "fail": "✗", "running": "⟳", "pending": "⏳"}.get(status, "·")
         if rc is None and status != "running":
             meta = f"{sym} sub-task [{idx}/{self._total}]  状态: {status}  耗时: --"
@@ -713,11 +857,21 @@ class RunnerWindow(QMainWindow):
             rc_str = str(rc) if rc is not None else "..."
             meta = (f"{sym} sub-task [{idx}/{self._total}]  "
                     f"rc={rc_str}  耗时: {dt:.2f}s  状态: {status}")
+        if desc:
+            meta += f"  |  📌 {desc}"
         if log_path:
             meta += f"  |  log: {log_path}"
         self.lbl_detail_meta.setText(meta)
-        # 命令区 (完整, 多行) — 自动选中文本, 让用户立即知道有完整命令可复制
-        self.txt_detail_cmd.setPlainText(cmd if cmd else "(空命令)")
+        # 命令区 (完整, 多行) — desc + 命令组合, 自动选中文本
+        if desc and cmd:
+            full_text = f"📌 {desc}\n\n$ {cmd}"
+        elif desc:
+            full_text = f"📌 {desc}\n\n(空命令)"
+        elif cmd:
+            full_text = cmd
+        else:
+            full_text = "(空命令)"
+        self.txt_detail_cmd.setPlainText(full_text)
         if cmd:
             # 全选 (让用户立刻知道可以 Ctrl+C 复制完整内容)
             cursor = self.txt_detail_cmd.textCursor()

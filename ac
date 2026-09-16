@@ -46,6 +46,7 @@ import sys
 import json
 import re
 import shutil
+from typing import Optional
 import argparse
 import subprocess
 import threading
@@ -441,14 +442,16 @@ TASK_LOG_ROOT = Path("/tmp/ac_task_logs")
 
 
 def _run_multi_subtasks(task_name: str, sub_cmds: list, args: list,
-                         local_config: dict) -> int:
+                         local_config: dict, sub_descs: Optional[list] = None) -> int:
     """2026-09-10 新增: 串行执行 task 的多个 sub-task (cmd 是数组)
     每个 sub-task:
       - 独立 log: /tmp/ac_task_logs/<task_name>/<ts>_<idx>_<N>.log
-      - 独立 sub-meta: 含 sub_idx, sub_cmd, sub_rc
+      - 独立 sub-meta: 含 sub_idx, sub_cmd, sub_rc, sub_desc (中文说明, 让 UI 显示)
     主 task log = latest.log (所有 sub-task 输出按顺序 append)
     主 meta = latest.meta.json, 含 sub_logs 列表 + 总 rc
     任意 sub-task 失败 (rc != 0) 立即停止, 返 rc
+    2026-09-16 升级: 支持 sub_descs list (跟 sub_cmds 一一对应),
+      每个 sub-task 可有中文说明, 让 GUI 显示中文标签而不是 cmd.
     """
     import time as _t
     from datetime import datetime as _dt
@@ -461,6 +464,9 @@ def _run_multi_subtasks(task_name: str, sub_cmds: list, args: list,
     task_dir.mkdir(parents=True, exist_ok=True)
     ts = _dt.now().strftime("%Y%m%d_%H%M%S")
     n = len(sub_cmds)
+    # 规范化 sub_descs: 缺省用空串 list
+    if sub_descs is None or len(sub_descs) != n:
+        sub_descs = [""] * n
 
     print(f"\n{'='*70}")
     print(f"🚀 task={task_name} | sub-task 总数: {n}")
@@ -474,19 +480,27 @@ def _run_multi_subtasks(task_name: str, sub_cmds: list, args: list,
 
     for idx, sub_cmd in enumerate(sub_cmds):
         sub_log = task_dir / f"{ts}_{idx:02d}_of_{n:02d}.log"
+        sub_desc = sub_descs[idx] if idx < len(sub_descs) else ""
         sub_log.write_text(
             f"# ac --task {task_name} sub-task [{idx+1}/{n}]\n"
+            f"# desc: {sub_desc}\n"
             f"# cmd: {sub_cmd}\n# ts: {ts}\n\n",
             encoding="utf-8")
         # 2026-09-10 修: stdout 主行仍截断到 80 字符方便人看, 但额外打一行 cmd_full 完整版
         # GUI runner 解析 cmd_full 喂给 _sub_states (人类屏幕不会被撑爆, GUI 能拿完整)
-        print(f"\n▶▶▶ sub-task [{idx+1}/{n}]  cmd: {sub_cmd[:80]}{'...' if len(sub_cmd)>80 else ''}")
+        # 2026-09-16 升级: 如果有 sub_desc (中文说明), 优先用 desc 显示, 让用户一眼看到
+        if sub_desc:
+            print(f"\n▶▶▶ sub-task [{idx+1}/{n}]  📌 {sub_desc}")
+            print(f"   cmd: {sub_cmd[:80]}{'...' if len(sub_cmd)>80 else ''}")
+        else:
+            print(f"\n▶▶▶ sub-task [{idx+1}/{n}]  cmd: {sub_cmd[:80]}{'...' if len(sub_cmd)>80 else ''}")
         print(f"   log: {sub_log}")
         print(f"   📋 cmd_full: {sub_cmd}")  # 完整 cmd, GUI runner 专门解析这一行
         sub_meta = {
             "sub_idx": idx,
             "sub_n": n,
             "sub_cmd": sub_cmd,
+            "sub_desc": sub_desc,  # 2026-09-16 新增: 中文说明, 让 GUI 显示
             "sub_log": str(sub_log),
             "sub_rc": -1,  # 初始化
             "sub_ts_iso": _dt.now().isoformat(timespec="seconds"),
@@ -1073,14 +1087,34 @@ def main() -> int:
                     print(f"⚠ GUI runner 启动失败, 回退 CLI: {e}", file=sys.stderr)
         for t in local_config["tasks"]:
             if t.get("name") == task_name:
-                # 2026-09-10: task.cmd 可以是字符串 或 字符串数组 (sub-task list)
-                # 数组: 拆成多个 sub-task 串行跑, 每个 sub-task 独立 log
-                # 字符串: 2026-09-10 修 — 自动包装成 [cmd] 走 multi-sub-task 路径,
-                #   这样 GUI runner 永远能显示 sub-task 列表 (1 个或多个)
+                # 2026-09-10: task.cmd 可以是字符串, 字符串数组 (sub-task list), 或
+                #   字符串 dict 数组 (sub-task list + 每行说明, 让 UI 显示中文标签)
+                #   - str: 单 cmd, 包装成 1 个 sub-task
+                #   - list[str]: 多个 sub-task, 走 multi-sub-task 路径
+                #   - list[dict{desc, cmd}]: 多个 sub-task + 每行中文说明
+                #   数组: 拆成多个 sub-task 串行跑, 每个 sub-task 独立 log
                 task_cmd = t.get("cmd", "")
                 if isinstance(task_cmd, list):
+                    # 检测是不是 list[dict{desc, cmd}] 格式
+                    sub_cmds_for_run = []
+                    sub_descs_for_run = []
+                    for idx, item in enumerate(task_cmd):
+                        if isinstance(item, dict):
+                            sub_desc = item.get("desc", "")
+                            sub_c = item.get("cmd", "")
+                            sub_cmds_for_run.append(sub_c)
+                            sub_descs_for_run.append(sub_desc)
+                        elif isinstance(item, str):
+                            # list[str] 跟 list[dict] 混用, 旧格式
+                            sub_cmds_for_run.append(item)
+                            sub_descs_for_run.append("")
                     # 标记为 multi-sub-task, 走 _run_multi_subtasks
-                    args.extend(["--__multi_cmds__"] + task_cmd)
+                    # 传 [desc1, cmd1, desc2, cmd2, ...] 让 _run_multi_subtasks 解析 desc
+                    if sub_cmds_for_run:
+                        args.extend(["--__multi_cmds__"])
+                        for desc, c in zip(sub_descs_for_run, sub_cmds_for_run):
+                            # 用 sentinel 分隔: __SUB_DESC__<desc>__SUB_END__<cmd>
+                            args.append(f"__SUB_DESC__{desc}__SUB_END__{c}")
                 elif isinstance(task_cmd, str) and task_cmd:
                     # 字符串 → 包装成 1 个 sub-task 的 list
                     args.extend(["--__multi_cmds__", task_cmd])
@@ -1112,15 +1146,37 @@ def main() -> int:
     if "--__multi_cmds__" in args:
         mc_idx = args.index("--__multi_cmds__")
         # 后面所有 arg 都是 sub-task 命令 (直到下一个 -- 开头的标记)
+        # 2026-09-16 升级: 每个 arg 可能是 sentinel 格式 __SUB_DESC__<desc>__SUB_END__<cmd>
+        #   (从 ai_build.json list[dict{desc,cmd}] 来), 或普通 cmd string (向后兼容).
+        #   解析时拆成 (desc, cmd) pair 喂给 _run_multi_subtasks.
         sub_cmds = []
+        sub_descs = []
         i = mc_idx + 1
         while i < len(args) and not args[i].startswith("--"):
-            sub_cmds.append(args[i])
+            arg = args[i]
+            if arg.startswith("__SUB_DESC__"):
+                # 拆 sentinel: __SUB_DESC__<desc>__SUB_END__<cmd>
+                rest = arg[len("__SUB_DESC__"):]
+                # 找 __SUB_END__
+                end_marker = "__SUB_END__"
+                end_idx = rest.find(end_marker)
+                if end_idx >= 0:
+                    desc = rest[:end_idx]
+                    cmd = rest[end_idx + len(end_marker):]
+                    sub_descs.append(desc)
+                    sub_cmds.append(cmd)
+                else:
+                    # 格式错误, fallback 整段当 cmd
+                    sub_descs.append("")
+                    sub_cmds.append(arg)
+            else:
+                sub_descs.append("")
+                sub_cmds.append(arg)
             i += 1
         # 移除 --__multi_cmds__ 和它的参数
         args = args[:mc_idx] + args[i:]
-        # 走多 sub-task 执行
-        return _run_multi_subtasks(task_name, sub_cmds, args, local_config)
+        # 走多 sub-task 执行 (传 desc list)
+        return _run_multi_subtasks(task_name, sub_cmds, args, local_config, sub_descs)
 
     # 过滤掉 ac 自己的特殊参数
     def filter_args(input_args, exclude_list):
@@ -1171,20 +1227,24 @@ def main() -> int:
 
     # 2026-09-11 修: ac 用 --cwd, 但 ab 接收 --project /path/to/proj
     # 转 --cwd → --project 给 ab (CPP_PANEL / compile_tool 也都不认 --cwd)
-    if "--cwd" in args_for_backend:
-        i = args_for_backend.index("--cwd")
-        if i + 1 < len(args_for_backend) and not args_for_backend[i+1].startswith("-"):
-            cwd_value = args_for_backend[i+1]
-            args_for_backend = args_for_backend[:i] + ["--project", cwd_value] + args_for_backend[i+2:]
-        else:
-            args_for_backend = args_for_backend[:i] + args_for_backend[i+1:]
-    if "-d" in args_for_backend:
-        i = args_for_backend.index("-d")
-        if i + 1 < len(args_for_backend) and not args_for_backend[i+1].startswith("-"):
-            cwd_value = args_for_backend[i+1]
-            args_for_backend = args_for_backend[:i] + ["--project", cwd_value] + args_for_backend[i+2:]
-        else:
-            args_for_backend = args_for_backend[:i] + args_for_backend[i+1:]
+    # 2026-09-16 修: CLI 模式 (compile_tool.py) 用 --cwd, 不转 --project. 只给 GUI
+    #   后端 (ab_launcher / cpp_panel) 转 --project. 修 reset-and-restart-with-remote-main
+    #   task 报 --project 错误 (ac 自动加 --cwd 但 compile_tool.py 不认).
+    if not use_cli:
+        if "--cwd" in args_for_backend:
+            i = args_for_backend.index("--cwd")
+            if i + 1 < len(args_for_backend) and not args_for_backend[i+1].startswith("-"):
+                cwd_value = args_for_backend[i+1]
+                args_for_backend = args_for_backend[:i] + ["--project", cwd_value] + args_for_backend[i+2:]
+            else:
+                args_for_backend = args_for_backend[:i] + args_for_backend[i+1:]
+        if "-d" in args_for_backend:
+            i = args_for_backend.index("-d")
+            if i + 1 < len(args_for_backend) and not args_for_backend[i+1].startswith("-"):
+                cwd_value = args_for_backend[i+1]
+                args_for_backend = args_for_backend[:i] + ["--project", cwd_value] + args_for_backend[i+2:]
+            else:
+                args_for_backend = args_for_backend[:i] + args_for_backend[i+1:]
 
     # 优先用 ab_launcher (新的 C++ Qt ab, 带源码检测), 兜底老 cpp_panel/ai_panel
     if AB_LAUNCHER.exists() and not use_cli:

@@ -119,12 +119,14 @@ QStatusBar = None
 QTabWidget = None
 QTextCursor = None
 QTextEdit = None
+QThread = None
 QTimer = None
 QToolBar = None
 QTreeWidget = None
 QTreeWidgetItem = None
 QVBoxLayout = None
 QWidget = None
+QIcon = None
 Qt = None
 Signal = None
 Slot = None
@@ -132,13 +134,13 @@ Slot = None
 if QT_BACKEND == "pyside6":
     from PySide6 import QtCore, QtWidgets, QtGui
     from PySide6.QtCore import (
-        Qt, QTimer, QObject, Signal, Slot, QProcess, QProcessEnvironment,
+        Qt, QThread, QTimer, QObject, Signal, Slot, QProcess, QProcessEnvironment,
         QPointF, QRectF, QFileSystemWatcher
     )
     # PySide6 6.5+ 把 QAction / QShortcut / QActionGroup 从 QtWidgets 移到了 QtGui
     from PySide6.QtGui import (
         QAction, QActionGroup, QShortcut,
-        QBrush, QColor, QFont, QKeySequence, QPainter, QPainterPath,
+        QBrush, QColor, QFont, QIcon, QKeySequence, QPainter, QPainterPath,
         QPalette, QPen, QTextCursor
     )
     from PySide6.QtWidgets import (
@@ -154,11 +156,11 @@ if QT_BACKEND == "pyside6":
 elif QT_BACKEND == "pyqt5":
     from PyQt5 import QtCore, QtWidgets, QtGui
     from PyQt5.QtCore import (
-        Qt, QTimer, QObject, pyqtSignal as Signal, pyqtSlot as Slot,
+        Qt, QThread, QTimer, QObject, pyqtSignal as Signal, pyqtSlot as Slot,
         QProcess, QProcessEnvironment, QPointF, QRectF, QFileSystemWatcher
     )
     from PyQt5.QtGui import (
-        QBrush, QColor, QFont, QKeySequence, QPainter, QPainterPath, QPalette,
+        QBrush, QColor, QFont, QIcon, QKeySequence, QPainter, QPainterPath, QPalette,
         QPen, QTextCursor
     )
     # PyQt5 的 QAction 在 QtWidgets 里 (Qt6 移到 QtGui)

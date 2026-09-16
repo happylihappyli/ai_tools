@@ -48,8 +48,29 @@ AbConfig AbConfig::load(const QString& path) {
         QJsonObject t = tv.toObject();
         Task tk;
         tk.name = t["name"].toString();
-        tk.cmd  = t["cmd"].toString();
         tk.description = t["description"].toString();
+
+        // 2026-09-16 新增: cmd 字段可以是 string (老格式) 或 array (新格式 list[dict{desc, cmd}])
+        QJsonValue cmdVal = t["cmd"];
+        if (cmdVal.isArray()) {
+            // 新格式: array, 每个元素是 {"desc": "..", "cmd": ".."} 或纯 string
+            QJsonArray cmdArr = cmdVal.toArray();
+            for (const auto& cv : cmdArr) {
+                if (cv.isObject()) {
+                    QJsonObject co = cv.toObject();
+                    tk.sub_descs << co["desc"].toString();
+                    tk.sub_cmds  << co["cmd"].toString();
+                } else if (cv.isString()) {
+                    tk.sub_descs << "";
+                    tk.sub_cmds  << cv.toString();
+                }
+                // null / 其他类型 → 跳过
+            }
+        } else {
+            // 老格式: 纯 string
+            tk.cmd = cmdVal.toString();
+        }
+
         if (!tk.name.isEmpty()) cfg.tasks.push_back(tk);
     }
 
