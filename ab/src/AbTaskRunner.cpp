@@ -90,10 +90,17 @@ void AbTaskRunner::runSubTasks(const QString& task_name,
 // 启动当前 sub_idx_ 的 sub-task
 void AbTaskRunner::runNextSubTask() {
     if (sub_idx_ >= sub_total_) {
-        // 全部 sub-task 完成, 恢复单 task 模式
+        // 全部 sub-task 完成, emit finished signal 让 AbMainWindow.onFinished
+        //   调 current_on_done_() → runNextInAuto() (auto 链下一步).
+        // 修前 BUG: 这里直接 return 没 emit finished, 导致 auto 链跑完 build-v6
+        //   (4/4 sub-task) 后卡住, [auto 2/3] run-v6-vk 永远不触发.
+        double elapsed = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - start_t_).count();
+        QString done_name = task_name_;
         sub_total_ = 0;
         sub_cmds_.clear();
         sub_descs_.clear();
+        emit finished(done_name, 0, elapsed);  // 修: 触发 callback → runNextInAuto
         return;
     }
     QString sub_cmd  = sub_cmds_[sub_idx_];
