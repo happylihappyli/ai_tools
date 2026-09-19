@@ -11,6 +11,7 @@
 //     title, window: {width, height},
 //     theme: "dark"|"light", auto_start: bool,
 //     show_log_dock: bool,
+//     disable_built_in_toolbar: bool,  // 2026-09-18 加 — true 时只显 ui.toolbar 自定义按钮
 //     menus: [{name, items: [{type, id, label, shortcut, task, cmd, ...}]}],
 //     toolbar: [{id, label, tooltip, task, ...}],
 //     buttons: [{id, label, color, task, ...}],
@@ -92,6 +93,7 @@ struct AbConfig {
     QString theme      = "dark";        // "dark" | "light"
     bool    auto_start = true;
     bool    show_log_dock = true;
+    bool    disable_built_in_toolbar = false;  // 2026-09-18 加 — true 时 buildToolbar 只显 ui.toolbar 自定义按钮, 不加 F5/F6/F7/run_after_build 等默认按钮
 
     std::vector<AbMenuDef> menus;
     std::vector<AbButtonDef> toolbar;

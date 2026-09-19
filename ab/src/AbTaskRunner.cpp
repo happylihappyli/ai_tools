@@ -43,6 +43,7 @@ void AbTaskRunner::run(const QString& task_name, const QString& cmd,
         return;
     }
     task_name_  = task_name;
+    last_single_cmd_ = cmd;  // 2026-09-18 加 — onProcError 时能报 cmd (跟 sub_cmds_ 对称)
     pending_.clear();
     sub_total_  = 0;   // 标记为单 task 模式 (区别于 sub-task 模式)
     sub_idx_    = 0;
@@ -190,12 +191,12 @@ void AbTaskRunner::onProcFinished(int exit_code, QProcess::ExitStatus /*status*/
         // 2026-09-16 v10: emit output 总结标记, 让实时 log 区能看到 sub-task 退出码 + 耗时
         if (exit_code == 0) {
             emit output(task_name_,
-                QString("✓ [sub %1/%2] 完成 (rc=0 耗时 %.2fs)")
-                    .arg(idx1).arg(sub_total_).arg(dt));
+                QString("✓ [sub %1/%2] 完成 (rc=0 耗时 %3s)")
+                    .arg(idx1).arg(sub_total_).arg(dt, 0, 'f', 2));
         } else {
             emit output(task_name_,
-                QString("✗ [sub %1/%2] 失败 (rc=%3 耗时 %.2fs)")
-                    .arg(idx1).arg(sub_total_).arg(exit_code).arg(dt));
+                QString("✗ [sub %1/%2] 失败 (rc=%3 耗时 %4s)")
+                    .arg(idx1).arg(sub_total_).arg(exit_code).arg(dt, 0, 'f', 2));
         }
 
         if (exit_code != 0) {
@@ -235,11 +236,18 @@ void AbTaskRunner::onProcError(QProcess::ProcessError err) {
         case QProcess::UnknownError:  err_name = "UnknownError"; break;
     }
     // stderr + /tmp/ab-session.log 都写 (跟 log() 一样的 fallback 机制, 让用户本地也能 grep 到)
+    // 2026-09-18: 报 cmd 时检查 sub_cmds_ (sub-task 模式) 和 last_single_cmd_ (单 cmd 模式)
+    QString report_cmd;
+    if (sub_idx_ < sub_cmds_.size()) {
+        report_cmd = sub_cmds_[sub_idx_];
+    } else {
+        report_cmd = last_single_cmd_;
+    }
     fprintf(stderr,
         "[AbTaskRunner] QProcess 错误: %s (%d) msg=\"%s\" task=%s cmd=\"%.200s\"\n",
         err_name, static_cast<int>(err), err_str.c_str(),
         task_name_.toUtf8().constData(),
-        (sub_idx_ < sub_cmds_.size() ? sub_cmds_[sub_idx_] : QString()).toUtf8().constData());
+        report_cmd.toUtf8().constData());
     fflush(stderr);
     {
         FILE* fp = fopen("/tmp/ab-session.log", "a");

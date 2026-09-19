@@ -27,6 +27,8 @@
 #include <QHash>
 #include <QStringList>
 #include <QList>
+// 2026-09-19: ai_build.json 热重载 (auto-reload + F5 手动 reload)
+#include <QFileSystemWatcher>
 #include <functional>
 #include "AbConfig.h"
 
@@ -56,7 +58,7 @@ class InspectorWindow;
 class AbMainWindow : public QMainWindow {
     Q_OBJECT
 public:
-    explicit AbMainWindow(const AbConfig& cfg, QWidget* parent = nullptr);
+    explicit AbMainWindow(const AbConfig& cfg, const QString& configPath = QString(), QWidget* parent = nullptr);
     ~AbMainWindow() override;
 
     void reloadConfig();
@@ -144,6 +146,10 @@ private:
     bool panelFindTaskLists(const QString& name, QStringList& cmds, QStringList& descs) const;
 
     AbConfig cfg_;
+    // 2026-09-19: ai_build.json 路径 — 用于 reload + QFileSystemWatcher 自动重读
+    QString config_path_;
+    // 2026-09-19: 监听 ai_build.json 改动, 自动 reload (免去重启 ab)
+    QFileSystemWatcher* config_watcher_ = nullptr;
     AbTaskRunner* runner_ = nullptr;
     // 2026-09-16 v4: 任务检查器改为独立窗口 (主窗口不再 dock)
     InspectorWindow* inspector_window_ = nullptr;

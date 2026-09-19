@@ -81,6 +81,7 @@ AbConfig AbConfig::load(const QString& path) {
         cfg.theme = ui["theme"].toString(cfg.theme);
         cfg.auto_start = ui["auto_start"].toBool(cfg.auto_start);
         cfg.show_log_dock = ui["show_log_dock"].toBool(cfg.show_log_dock);
+        cfg.disable_built_in_toolbar = ui["disable_built_in_toolbar"].toBool(cfg.disable_built_in_toolbar);  // 2026-09-18
 
         // window
         QJsonObject win = ui["window"].toObject();

@@ -73,6 +73,7 @@ private:
     QProcess* ensureProc();  // 共享: 准备 QProcess (lazy init + signal connect)
     QProcess* proc_ = nullptr;
     QString   task_name_;
+    QString   last_single_cmd_;  // 2026-09-18 加 — 单 cmd 模式存的 cmd, onProcError 报 cmd 用
     std::chrono::steady_clock::time_point start_t_;
     QString   pending_;  // 行缓冲
 

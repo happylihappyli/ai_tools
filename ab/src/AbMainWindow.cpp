@@ -54,8 +54,12 @@
 
 namespace ab {
 
-AbMainWindow::AbMainWindow(const AbConfig& cfg, QWidget* parent)
-    : QMainWindow(parent), cfg_(cfg) {
+AbMainWindow::AbMainWindow(const AbConfig& cfg, const QString& configPath, QWidget* parent)
+    : QMainWindow(parent),
+      cfg_(cfg),
+      // 2026-09-19: ai_build.json 路径 — 用于 reload + QFileSystemWatcher
+      //   默认: cfg_.cwd + "/ai_build.json" (跟 main.cpp:1426 找 configPath 路径一致)
+      config_path_(configPath.isEmpty() ? (cfg_.cwd + "/ai_build.json") : configPath) {
     updateWindowTitle();   // 2026-09-09: 初始窗口标题 = cfg_.title
     // 2026-09-16 v5: 启动时窗口宽度 = 屏幕宽度的 80%, 高度用 cfg (默认 700)
     //   跨屏幕分辨率自动适配 (1080p / 1440p / 4K 都能 80% 填满)
@@ -199,6 +203,34 @@ void AbMainWindow::buildFromConfig() {
     // 2026-09-16 v4: 移除 inspector_ dock, 改成独立窗口
     //   inspector_window_ 在 onOpenInspector() 里 lazy 创建
     //   桥接 inspector signal (1 参) → runTaskByName (2 参) 移到 lazy 里
+
+    // 2026-09-19: ai_build.json 热重载 — 监听文件 mtime 变化自动 reload
+    //   不需要重启 ab 就能反映 ai_build.json 修改 (省去 pkill+ab 流程)
+    if (!config_path_.isEmpty() && QFileInfo::exists(config_path_)) {
+        config_watcher_ = new QFileSystemWatcher(this);
+        config_watcher_->addPath(config_path_);
+        connect(config_watcher_, &QFileSystemWatcher::fileChanged,
+                this, [this](const QString &path) {
+            // fileChanged 触发时旧 inode 已释放, watcher 自动失去监听.
+            // 100ms 后重新 addPath 让下次写再次触发 (覆盖 vi/sed/Edit 多次写的场景)
+            log("ok", QString("[auto-reload] ai_build.json 改动, 自动重读..."));
+            QTimer::singleShot(100, this, [this, path]() {
+                reloadConfig();
+                if (config_watcher_ && !config_watcher_->files().contains(path)) {
+                    config_watcher_->addPath(path);
+                }
+            });
+        });
+    }
+    // F5 快捷键手动 reload (auto-reload 出问题时强制刷新)
+    QAction* reload_act = new QAction("重读 ai_build.json", this);
+    reload_act->setShortcut(QKeySequence("F5"));
+    reload_act->setToolTip("重读 ai_build.json + 重建工具栏/菜单/按钮 (免去重启 ab)");
+    addAction(reload_act);  // 加到主窗口, 全局快捷键生效
+    connect(reload_act, &QAction::triggered, this, [this]() {
+        log("ok", "[F5] 重读 ai_build.json...");
+        reloadConfig();
+    });
 }
 
 // 2026-09-02: 框架内置通用菜单 (所有调试程序都需要)
@@ -323,11 +355,16 @@ void AbMainWindow::buildBuiltInToolbar() {
         actions_[id] = a;
     };
 
-    add("▶", "run_selected", "跑选中任务 (F5)", "F5");
-    add("⚡", "run_auto",     "跑 Auto 链 (F6)", "F6");
-    tb->addSeparator();
-    // 2026-09-09: 4 个项目特定动作 (从 buildBuiltInButtons 合并到工具栏)
-    if (!cfg_.run_after_build.binary_path.isEmpty()) {
+    // 2026-09-18: disable_built_in_toolbar=true → 完全跳过默认按钮, 只显 ui.toolbar 自定义按钮
+    if (!cfg_.disable_built_in_toolbar) {
+        add("▶", "run_selected", "跑选中任务 (F5)", "F5");
+        add("⚡", "run_auto",     "跑 Auto 链 (F6)", "F6");
+        tb->addSeparator();
+    }
+
+    // 2026-09-09: 项目特定动作 (从 buildBuiltInButtons 合并到工具栏)
+    // 2026-09-18: disable_built_in_toolbar=true → 也跳过 run_after_build 5 个按钮
+    if (!cfg_.disable_built_in_toolbar && !cfg_.run_after_build.binary_path.isEmpty()) {
         QString binary_name = QFileInfo(cfg_.run_after_build.binary_path).fileName();
         QString btn_label = cfg_.run_after_build.button_label.isEmpty()
                             ? QString("🚀 启动 %1").arg(binary_name)
@@ -1578,7 +1615,73 @@ void AbMainWindow::log(const QString& level, const QString& msg) {
 }
 
 void AbMainWindow::reloadConfig() {
-    // TODO: 重读 ai_build.json, 重建 UI
+    // 2026-09-19: 实现真正的 reload — 重读 ai_build.json + 重建工具栏/菜单/按钮
+    //   之前是 TODO, 用户改 ai_build.json 后必须重启 ab 才能生效, 体验差.
+    //   现在: F5 快捷键 + QFileSystemWatcher 自动触发, 实时反映修改.
+    if (config_path_.isEmpty()) {
+        log("warn", "[reload] config_path_ 空, 跳过");
+        return;
+    }
+    AbConfig new_cfg = AbConfig::load(config_path_);
+    // sanity check: 加载失败 (空 cfg 或 cwd 变了) → 保留旧配置, 不破坏 UI
+    if (new_cfg.cwd.isEmpty() && new_cfg.tasks.empty() && new_cfg.auto_chain.isEmpty()) {
+        log("warn", QString("[reload] %1 加载失败 (解析错误?), 保留旧配置").arg(config_path_));
+        return;
+    }
+    cfg_ = new_cfg;
+    log("ok", QString("[reload] 已重读 ai_build.json: tasks=%1 toolbar=%2 buttons=%3 auto_chain=%4")
+        .arg(cfg_.tasks.size())
+        .arg(cfg_.toolbar.size())
+        .arg(cfg_.buttons.size())
+        .arg(cfg_.auto_chain.join("→")));
+
+    // 1) 清掉旧 toolbar ("AbMainToolBar" 是 buildToolbar 创建的标识)
+    QToolBar* old_tb = nullptr;
+    for (QToolBar* tb : findChildren<QToolBar*>()) {
+        if (tb->objectName() == "AbMainToolBar") { old_tb = tb; break; }
+    }
+    if (old_tb) {
+        old_tb->clear();  // 清 action (不 delete, action 还在 actions_ 里等下重建)
+        removeToolBar(old_tb);
+        old_tb->deleteLater();
+    }
+    // 2) 清掉旧 main buttons (主窗口中心 widget 里加的按钮行)
+    //    buildMainButtons 创建 QHBoxLayout (没设 objectName) 加到 vl 末尾
+    if (QWidget* cw = centralWidget()) {
+        if (QVBoxLayout* vl = qobject_cast<QVBoxLayout*>(cw->layout())) {
+            // 从末尾往前删所有 QHBoxLayout (那是 buildMainButtons 加的)
+            for (int i = vl->count() - 1; i >= 0; --i) {
+                QLayoutItem* it = vl->itemAt(i);
+                if (it && it->layout() && qobject_cast<QHBoxLayout*>(it->layout())) {
+                    QLayout* l = it->layout();
+                    // 清 layout 内的 widget
+                    while (l->count() > 0) {
+                        QLayoutItem* child = l->takeAt(0);
+                        if (child->widget()) child->widget()->deleteLater();
+                        delete child;
+                    }
+                    vl->removeItem(it);
+                    delete l;
+                }
+            }
+        }
+    }
+    // 3) 清 actions_ 和 buttons_ (让 buildToolbar / buildMainButtons 重建)
+    //   Qt5 QHash 解引用直接返回值, 不是 std::pair — 用 key() 拿 key, 用 value() 拿 value
+    //   (Qt6 的 begin/end 返 std::pair 才用 .first/.second)
+    for (auto it = actions_.begin(); it != actions_.end(); ++it) {
+        it.value()->deleteLater();
+    }
+    actions_.clear();
+    for (auto it = buttons_.begin(); it != buttons_.end(); ++it) {
+        it.value()->deleteLater();
+    }
+    buttons_.clear();
+
+    // 4) 重建
+    buildToolbar();
+    buildMainButtons();
+    updateWindowTitle();
 }
 
 // =====================================================================

@@ -2,6 +2,8 @@
 // 用法:
 //   ab                          # 自动在 cwd 找 ai_build.json
 //   ab /path/to/project         # 指定项目 (找 ai_build.json)
+//   ab cloud_main               # 找 ai_build.cloud_main.json (2026-09-18 加)
+//   ab cloud_main_qt            # 找 ai_build.cloud_main_qt.json (Qt dock 测试)
 //   ab --project /path/to/proj
 //   ab --config ai_build.json   # 指定配置文件
 //   ab --no-auto                # 不自动跑 auto 链
@@ -32,6 +34,10 @@ static void printHelp() {
         << "用法:\n"
         << "  ab                              # 当前目录找 ai_build.json\n"
         << "  ab /path/to/project             # 指定项目\n"
+        << "  ab <name>                       # 命名配置 (ai_build.<name>.json) — 2026-09-18 加\n"
+        << "    例: ab cloud_main_qt          # → ai_build.cloud_main_qt.json (聚焦 dock 测试)\n"
+        << "        ab cloud_main             # → ai_build.cloud_main.json (聚焦 cloud_main 编译)\n"
+        << "        ab both_3d                # → ai_build.both_3d.json (cloud_main + qtdock 链路)\n"
         << "  ab --config /path/to/ai_build.json\n"
         << "  ab --no-auto                    # 不自动跑 auto 链\n"
         << "  ab --doctor                     # 环境自检\n"
@@ -116,6 +122,19 @@ int main(int argc, char** argv) {
         else if (configPath.isEmpty() && QFileInfo(a).isFile()) {
             configPath = a;
         }
+        // 2026-09-18: `ab <name>` 自动找 ai_build.<name>.json (跟 `ab cloud_main_qt` 直接对应一个聚焦配置)
+        //   优先级: ai_build.<name>.json (相对 cwd) → 失败继续走默认 ai_build.json 查找
+        //   例: `ab cloud_main_qt` → ai_build.cloud_main_qt.json (Qt dock 测试)
+        //       `ab cloud_main`    → ai_build.cloud_main.json (cloud_main 编译/启动)
+        //       `ab both_3d`       → ai_build.both_3d.json (cloud_main + qtdock 一起跑)
+        else if (configPath.isEmpty() && !a.startsWith("-")) {
+            QDir cwd = QDir::current();
+            QString named = cwd.filePath(QString("ai_build.%1.json").arg(a));
+            if (QFileInfo(named).isFile()) {
+                configPath = named;
+                std::cerr << "[ab] 命名配置: " << named.toStdString() << "\n";
+            }
+        }
     }
 
     if (doctorMode) {
@@ -149,7 +168,7 @@ int main(int argc, char** argv) {
     AbTheme::apply(static_cast<int>(AbTheme::parse(cfg.theme)));
 
     // 创建窗口
-    ab::AbMainWindow w(cfg);
+    ab::AbMainWindow w(cfg, configPath);
     w.show();
     return app.exec();
 }
