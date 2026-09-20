@@ -107,7 +107,7 @@ public slots:
     void onPanelStopClicked();
     void onPanelCopyLog();
     void onPanelOpenLogDir();
-    void onPanelLaunchCloud(bool use_gl);
+    // 2026-09-20: 移除 onPanelLaunchCloud — 不属于 ai_tools 默认工具栏功能
 
 private:
     void buildFromConfig();
@@ -182,12 +182,10 @@ private:
     QPlainTextEdit* panel_txt_detail_cmd_ = nullptr;
     // 顶部工具栏 (2026-09-16 v7: 5 个按钮合并到这里, 不再占底部空间)
     QToolBar*    panel_toolbar_      = nullptr;
-    // 顶部工具栏按钮
+    // 顶部工具栏按钮 (2026-09-20: 工具栏只保留 Stop, 复制 log / 打开 log 目录已移到菜单)
     QPushButton* panel_btn_stop_      = nullptr;
-    QPushButton* panel_btn_copy_log_  = nullptr;
-    QPushButton* panel_btn_open_dir_  = nullptr;
-    QPushButton* panel_btn_launch_cloud_    = nullptr;
-    QPushButton* panel_btn_launch_cloud_gl_ = nullptr;
+    // 2026-09-20: 移除 panel_btn_copy_log_ / panel_btn_open_dir_ — 已移到 "日志(&L)" 菜单
+    // 2026-09-20: 移除 panel_btn_launch_cloud_ / panel_btn_launch_cloud_gl_ — 不属于 ai_tools 默认工具栏功能
     // 计时器
     QTimer*      panel_elapsed_timer_ = nullptr;
     QTimer*      panel_current_dt_timer_ = nullptr;

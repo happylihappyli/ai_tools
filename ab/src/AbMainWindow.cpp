@@ -292,6 +292,27 @@ void AbMainWindow::buildBuiltInMenus() {
         actions_["tts"] = a;
     }
 
+    // --- 日志 (&L) ---
+    // 2026-09-20: 把 "复制 log" / "打开 log 目录" 从工具栏移到菜单 —
+    //   这两个是次要操作, 不需要默认占用工具栏.
+    //   Ctrl+L = 复制 log (一键复制当前 panel log 到剪贴板)
+    //   Ctrl+Shift+O = 打开 log 目录 (用系统文件管理器)
+    QMenu* m_log = mb->addMenu("日志(&L)");
+    {
+        QAction* a = m_log->addAction("📋 复制 log");
+        a->setShortcut(QKeySequence("Ctrl+L"));
+        a->setData("copy_log");
+        connect(a, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
+        actions_["copy_log"] = a;
+    }
+    {
+        QAction* a = m_log->addAction("📂 打开 log 目录");
+        a->setShortcut(QKeySequence("Ctrl+Shift+O"));
+        a->setData("open_log_dir");
+        connect(a, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
+        actions_["open_log_dir"] = a;
+    }
+
     // --- 视图 (&V) ---
     QMenu* m_view = mb->addMenu("视图(&V)");
     {
@@ -407,9 +428,9 @@ void AbMainWindow::buildCentralPanel() {
     root->setContentsMargins(8, 8, 8, 8);
     root->setSpacing(6);
 
-    // 2026-09-16 v7: 用户反馈"底部的按钮可以放到工具栏" — 把 Stop / Copy log / 打开 log /
-    //   启动 cloud_main (Vulkan/GL) 5 个按钮合并到顶部 QToolBar, 节省底部高度
-    //   让 sub-task 列表可以显示更多行
+    // 2026-09-16 v7: 把 Stop 按钮放到顶部 QToolBar, 节省底部高度, 让 sub-task 列表可以显示更多行
+    // 2026-09-20: 进一步精简工具栏 — 只保留 Stop (核心控制), 复制 log / 打开 log 目录
+    //   移到菜单的 "日志(&L)" 项, 默认工具栏不再提供这些次要操作.
     panel_toolbar_ = new QToolBar("操作", this);
     panel_toolbar_->setMovable(false);
     panel_toolbar_->setIconSize(QSize(16, 16));
@@ -425,34 +446,6 @@ void AbMainWindow::buildCentralPanel() {
         "QPushButton:disabled { background-color: #444; color: #888; }");
     connect(panel_btn_stop_, &QPushButton::clicked, this, &AbMainWindow::onPanelStopClicked);
     panel_toolbar_->addWidget(panel_btn_stop_);
-
-    panel_toolbar_->addSeparator();
-
-    panel_btn_copy_log_ = new QPushButton("📋 复制 log");
-    connect(panel_btn_copy_log_, &QPushButton::clicked, this, &AbMainWindow::onPanelCopyLog);
-    panel_toolbar_->addWidget(panel_btn_copy_log_);
-
-    panel_btn_open_dir_ = new QPushButton("📂 打开 log 目录");
-    connect(panel_btn_open_dir_, &QPushButton::clicked, this, &AbMainWindow::onPanelOpenLogDir);
-    panel_toolbar_->addWidget(panel_btn_open_dir_);
-
-    panel_toolbar_->addSeparator();
-
-    panel_btn_launch_cloud_ = new QPushButton("🚀 启动 cloud_main (Vulkan)");
-    panel_btn_launch_cloud_->setStyleSheet(
-        "QPushButton { background-color: #2d7d2d; color: #fff; padding: 4px 10px; "
-        "font-weight: bold; border-radius: 3px; }"
-        "QPushButton:hover { background-color: #3d9d3d; }");
-    connect(panel_btn_launch_cloud_, &QPushButton::clicked, this, [this]() { onPanelLaunchCloud(false); });
-    panel_toolbar_->addWidget(panel_btn_launch_cloud_);
-
-    panel_btn_launch_cloud_gl_ = new QPushButton("🟢 启动 cloud_main (GL)");
-    panel_btn_launch_cloud_gl_->setStyleSheet(
-        "QPushButton { background-color: #aa7d2d; color: #fff; padding: 4px 10px; "
-        "font-weight: bold; border-radius: 3px; }"
-        "QPushButton:hover { background-color: #c8902d; }");
-    connect(panel_btn_launch_cloud_gl_, &QPushButton::clicked, this, [this]() { onPanelLaunchCloud(true); });
-    panel_toolbar_->addWidget(panel_btn_launch_cloud_gl_);
 
     // 2026-09-16 v7: QToolBar 加到主窗口顶部 (header 上方)
     addToolBar(Qt::TopToolBarArea, panel_toolbar_);
@@ -867,6 +860,9 @@ void AbMainWindow::onActionTriggered() {
     if (id == "diag") { runTaskByName("diag"); return; }
     if (id == "view-log") { runTaskByName("view-log"); return; }
     if (id == "build+deploy") { runTaskByName("build+deploy"); return; }
+    // 2026-09-20: 复制 log / 打开 log 目录 (从工具栏移到菜单)
+    if (id == "copy_log")    { onPanelCopyLog(); return; }
+    if (id == "open_log_dir"){ onPanelOpenLogDir(); return; }
 
     // 通用: 找 button/toolbar/menu 定义, 按 task / cmd 跑
     for (const auto& b : cfg_.toolbar) {
@@ -1986,46 +1982,9 @@ void AbMainWindow::onPanelOpenLogDir() {
     log("warn", QString("⚠ 找不到文件管理器, log 目录: %1").arg(dir));
 }
 
-void AbMainWindow::onPanelLaunchCloud(bool use_gl) {
-    static const QString kBin  = "/home/bv/code/godot_ui_linux/godot-ui-standalone-skia/bin/Debug/cloud_main";
-    static const QString kCwd  = "/home/bv/code/godot_ui_linux/godot-ui-standalone-skia/bin/Debug";
-    if (!QFileInfo(kBin).isFile()) {
-        QMessageBox::warning(this, "启动失败",
-            QString("找不到 binary:\n%1\n\n请先跑 ac task 编译一次").arg(kBin));
-        return;
-    }
-    if (!QFileInfo(kCwd + "/libworkspace_v7.so").isFile()) {
-        QMessageBox::warning(this, "启动失败",
-            QString("找不到 libworkspace_v7.so, 请先编译 workspace_v7_lib"));
-        return;
-    }
-
-    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    env.insert("GDK_BACKEND", "wayland");
-    env.insert("MOZ_ENABLE_WAYLAND", "1");
-    env.insert("QT_QPA_PLATFORM", "wayland");
-    env.insert("WAYLAND_DISPLAY", env.value("WAYLAND_DISPLAY", "wayland-0"));
-    env.insert("VK_ICD_FILENAMES", "/usr/share/vulkan/icd.d/nvidia_icd.json");
-    env.insert("DISPLAY", env.value("DISPLAY", ":0"));
-
-    QStringList args;
-    args << "--rendering-driver" << (use_gl ? "opengl3" : "vulkan")
-         << "--rendering-method" << (use_gl ? "gl_compatibility" : "forward_plus");
-
-    qint64 pid = 0;
-    bool ok = QProcess::startDetached(kBin, args, kCwd, &pid);
-    if (ok && pid > 0) {
-        log("ok", QString("🚀 cloud_main 已启动 (pid=%1, %2)")
-            .arg(pid).arg(use_gl ? "OpenGL3 兼容模式" : "Vulkan+Wayland"));
-        if (sb_render_) {
-            sb_render_->setText(use_gl ? "渲染模式: OpenGL3" : "渲染模式: Vulkan (Forward+)");
-            sb_render_->setStyleSheet(
-                QString("color: %1; font-size: 12px; padding: 0 8px; font-weight: bold;")
-                    .arg(use_gl ? "#ffaa44" : "#88ccff"));
-        }
-    } else {
-        QMessageBox::warning(this, "启动失败", "QProcess::startDetached 返回失败");
-    }
-}
+// 2026-09-20: 移除 AbMainWindow::onPanelLaunchCloud() — 这是 godot_ui_linux 项目专用
+//   启动 cloud_main (Vulkan/GL) 的逻辑, 不属于 ai_tools 默认工具栏功能.
+//   需要在项目内启动 cloud_main 时, 走 ai_build.json 的 start-cloud-main task.
+//   相关成员变量 panel_btn_launch_cloud_ / panel_btn_launch_cloud_gl_ 也已从 .h 移除.
 
 }  // namespace ab
