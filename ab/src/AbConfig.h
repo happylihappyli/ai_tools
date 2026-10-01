@@ -36,6 +36,7 @@ struct AbButtonDef {
     QString cmd;         // 或直接命令
     QString shortcut;
     QString color;       // primary / success / warn / danger / default
+    int     row     = 0; // 2026-09-20 加 — toolbar 行号 (0/1/2), 同 row 一行, 不同 row 多个 QToolBar
     bool    checkable = false;
     bool    enabled    = true;
 };

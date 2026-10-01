@@ -7,6 +7,7 @@
 #include "InspectorWindow.h"  // 2026-09-16 v4: 独立 InspectorWindow (包 AbTaskInspector)
 #include "TaskRunnerWindow.h" // 2026-09-16: 独立任务运行器窗口 (仿 ac_task_runner_gui.py)
 
+#include <map>
 #include <QVBoxLayout>
 #include <QGuiApplication>
 #include <QScreen>
@@ -720,27 +721,43 @@ void AbMainWindow::buildMenus() {
 
 void AbMainWindow::buildToolbar() {
     if (cfg_.toolbar.empty()) return;
-    QToolBar* tb = addToolBar("主工具栏");
-    tb->setObjectName("AbMainToolBar");
-    tb->setMovable(true);
-    tb->setFloatable(true);
+    // 2026-09-20: 按 row 字段分组, 每行一个 QToolBar (Qt QToolBar 不自动 wrap)
+    //   ai_build.json button 可选 "row": 0/1/2, 同 row 一行, 缺省 0
+    std::map<int, std::vector<AbButtonDef>> by_row;
+    int max_row = 0;
     for (const auto& b : cfg_.toolbar) {
-        QAction* a = createActionForButton(b, this);
-        tb->addAction(a);
-        actions_[b.id] = a;
+        by_row[b.row].push_back(b);
+        if (b.row > max_row) max_row = b.row;
     }
-    // 2026-09-16: 加内置"📊 任务运行器"按钮 (仿 ac_task_runner_gui.py)
-    //   不依赖 ai_build.json, 始终存在
-    tb->addSeparator();
-    QAction* a_runner = new QAction("📊 任务运行器", this);
-    a_runner->setToolTip("打开独立任务运行器窗口 (仿 ac_task_runner_gui.py)\n"
-                        "左侧 sub-task 列表 + 右侧实时 log + ⚡ 当前执行 + 详情区\n"
-                        "底部按钮: Stop / 复制 log / 打开 log / 启动 cloud_main");
-    a_runner->setData("open_task_runner");
-    a_runner->setShortcut(QKeySequence("Ctrl+R"));
-    tb->addAction(a_runner);
-    actions_["open_task_runner"] = a_runner;
-    connect(a_runner, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
+    QToolBar* last_tb = nullptr;
+    for (int r = 0; r <= max_row; ++r) {
+        auto it = by_row.find(r);
+        if (it == by_row.end()) continue;
+        QToolBar* tb = addToolBar(QString("主工具栏 row=%1").arg(r));
+        tb->setObjectName(QString("AbMainToolBar_row%1").arg(r));
+        tb->setMovable(true);
+        tb->setFloatable(true);
+        for (const auto& b : it->second) {
+            QAction* a = createActionForButton(b, this);
+            tb->addAction(a);
+            actions_[b.id] = a;
+        }
+        // 第一行末尾加"📊 任务运行器"内置按钮
+        if (r == 0) {
+            tb->addSeparator();
+            QAction* a_runner = new QAction("📊 任务运行器", this);
+            a_runner->setToolTip("打开独立任务运行器窗口 (仿 ac_task_runner_gui.py)\n"
+                                "左侧 sub-task 列表 + 右侧实时 log + ⚡ 当前执行 + 详情区\n"
+                                "底部按钮: Stop / 复制 log / 打开 log / 启动 cloud_main");
+            a_runner->setData("open_task_runner");
+            a_runner->setShortcut(QKeySequence("Ctrl+R"));
+            tb->addAction(a_runner);
+            actions_["open_task_runner"] = a_runner;
+            connect(a_runner, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
+        }
+        last_tb = tb;
+    }
+    (void)last_tb;
 }
 
 void AbMainWindow::buildMainButtons() {

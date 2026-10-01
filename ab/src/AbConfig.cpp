@@ -130,6 +130,7 @@ AbConfig AbConfig::load(const QString& path) {
             b.cmd       = t["cmd"].toString();
             b.shortcut  = t["shortcut"].toString();
             b.color     = t["color"].toString();
+            b.row       = t["row"].toInt(0);  // 2026-09-20 加 — toolbar 行号 (默认 0)
             b.checkable = t["checkable"].toBool(false);
             cfg.toolbar.push_back(b);
         }
