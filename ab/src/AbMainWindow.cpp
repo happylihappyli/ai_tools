@@ -949,8 +949,16 @@ void AbMainWindow::onRunAuto() {
 
 void AbMainWindow::runNextInAuto() {
     if (auto_index_ >= auto_queue_.size()) {
-        log("ok", "auto 链全部完成 ✓");
-        speakTextAsync("全部完成");
+        // 2026-10-09 add-auto-exit: 链中断检测 — 之前某 task 失败 (rc != 0) 时不要退出,
+        //   让用户看到错误. 只有全部成功才退出.
+        bool all_ok = (last_task_exit_code_ == 0);
+        log("ok", QString("auto 链全部完成 ✓ (退出码 %1) auto_exit=%2")
+            .arg(last_task_exit_code_).arg(cfg_.auto_exit ? "true" : "false"));
+        speakTextAsync(all_ok ? "全部完成" : QString("失败 %1").arg(last_task_exit_code_));
+        if (cfg_.auto_exit && all_ok) {
+            // 100ms 延迟让 TTS "全部完成" 先播完, 退出码 = 0 (AI 拿 $? 判断成功).
+            QTimer::singleShot(100, qApp, []{ qApp->quit(); });
+        }
         return;
     }
     QString name = auto_queue_[auto_index_++];
@@ -1138,6 +1146,7 @@ void AbMainWindow::onOutput(const QString& task_name, const QString& line) {
 void AbMainWindow::onFinished(const QString& task_name, int exit_code, double elapsed) {
     log(exit_code == 0 ? "ok" : "err",
         QString("[%1] 退出码 %2  耗时 %3s").arg(task_name).arg(exit_code).arg(elapsed, 0, 'f', 1));
+    last_task_exit_code_ = exit_code;  // 2026-10-09 add-auto-exit: 给 runNextInAuto 检查
 
     // 2026-09-16 v3: 更新中央面板顶部状态 (status badge + elapsed 停 + 进度条满)
     if (panel_lbl_status_) {

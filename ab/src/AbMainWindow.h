@@ -217,6 +217,9 @@ private:
     bool   current_aborted_ = false;
     QStringList auto_queue_;
     int    auto_index_ = 0;
+    // 2026-10-09 add-auto-exit: 上一个 task 退出码. 0=成功, !=0=失败. auto_exit 模式下
+    //   失败时不要退 (让用户看错误); 链成功跑完时才退.
+    int    last_task_exit_code_ = 0;
     QString current_task_;
     QString current_cmd_;
     std::function<void()> current_on_done_;

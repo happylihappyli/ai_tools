@@ -95,6 +95,7 @@ struct AbConfig {
     bool    auto_start = true;
     bool    show_log_dock = true;
     bool    disable_built_in_toolbar = false;  // 2026-09-18 加 — true 时 buildToolbar 只显 ui.toolbar 自定义按钮, 不加 F5/F6/F7/run_after_build 等默认按钮
+    bool    auto_exit = false;  // 2026-10-09 加 — auto 链全部完成后自动退出 (适合 AI/脚本调用)
 
     std::vector<AbMenuDef> menus;
     std::vector<AbButtonDef> toolbar;

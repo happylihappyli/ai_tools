@@ -82,6 +82,7 @@ AbConfig AbConfig::load(const QString& path) {
         cfg.auto_start = ui["auto_start"].toBool(cfg.auto_start);
         cfg.show_log_dock = ui["show_log_dock"].toBool(cfg.show_log_dock);
         cfg.disable_built_in_toolbar = ui["disable_built_in_toolbar"].toBool(cfg.disable_built_in_toolbar);  // 2026-09-18
+        cfg.auto_exit = ui["auto_exit"].toBool(cfg.auto_exit);  // 2026-10-09 加 — 配 ui.auto_exit=true 也能在没 --auto-exit 参数时自动退出
 
         // window
         QJsonObject win = ui["window"].toObject();
@@ -183,11 +184,12 @@ QString AbConfig::toJsonString() const {
     s += QString("  cmd=%1\n").arg(cmd);
     s += QString("  auto=[%1]\n").arg(auto_chain.join(","));
     s += QString("  tasks=%1\n").arg(static_cast<int>(tasks.size()));
-    s += QString("  ui: title=%1 theme=%2 menus=%3 toolbar=%4 buttons=%5\n")
+    s += QString("  ui: title=%1 theme=%2 menus=%3 toolbar=%4 buttons=%5 auto_exit=%6\n")
         .arg(title).arg(theme)
         .arg(static_cast<int>(menus.size()))
         .arg(static_cast<int>(toolbar.size()))
-        .arg(static_cast<int>(buttons.size()));
+        .arg(static_cast<int>(buttons.size()))
+        .arg(auto_exit ? "true" : "false");  // 2026-10-09 add-auto-exit: dump 显 auto_exit
     if (!run_after_build.binary_path.isEmpty()) {
         s += QString("  run_after_build: %1 auto=%2\n")
             .arg(run_after_build.binary_path)

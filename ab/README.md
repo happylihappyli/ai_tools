@@ -136,6 +136,28 @@ ac-gui               # 旧名软链, 等同 ab
 - `args` — 传给 binary 的参数 (数组)
 - `env` — 额外环境变量 (对象, key=value 字符串)
 
+## task cmd 规则 (重要!)
+
+`tasks` 数组的 `cmd` 字段**禁止**用 `| tail -N` / `| head -N` / `| grep ...` / `| less` 等 pipe:
+
+- ❌ `scons ... 2>&1 | tail -30` — `tail` 等子进程结束才输出, ab 实时 log 区看不到任何东西
+- ❌ `scons ... 2>&1 | grep ERROR` — 同样缓冲, 实时看不到
+- ✅ `scons ...` — 直接跑, ab 通过 `QProcess::readyReadStandardOutput/Error` 实时显示每行
+
+**为什么**: ab 内部用 `QProcess` 启动 cmd, 它读 stdout/stderr 实时 emit 给 log 区。一旦 cmd 内有 `| tail`, 数据进 pipe 缓冲, 子进程结束才输出, ab 看不到实时进度, 用户体验差 (编译 5 分钟用户以为卡死)。
+
+**scons/script 等本身已经够短输出**: scons 默认只显示进度+警告+错误, 几百行不是问题。ab log 区有滚动 + 自动 max 10000 行 buffer。
+
+**如果输出真的太大** (例如 dump 几千行), 改用 redirect 到文件:
+```json
+"cmd": "scons ... > /tmp/build.log 2>&1; echo exit=$?"
+```
+然后在 description 里告诉用户 "看 /tmp/build.log"。
+
+**特殊例外**: `tail -f` 是允许的 (持续输出, 不会缓冲):
+- ✅ `tail -f /var/log/syslog` — ab 实时显示
+- ❌ `cat big.log | tail -30` — 还是缓冲
+
 ## 主题
 
 - `dark` (默认) — 暗黑色护眼, 提示信息淡黄色背景

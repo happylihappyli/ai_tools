@@ -7,6 +7,7 @@
 //   ab --project /path/to/proj
 //   ab --config ai_build.json   # 指定配置文件
 //   ab --no-auto                # 不自动跑 auto 链
+//   ab --auto-exit              # 2026-10-09 加 — auto 链全部完成后自动退出 (适合 AI/脚本调用)
 //   ab --doctor                 # 环境自检
 //   ab --theme dark|light|solarized|nord  # 强制主题 (2026-09-02: 加 solarized + nord)
 //   ab --help                   # 帮助
@@ -40,9 +41,16 @@ static void printHelp() {
         << "        ab both_3d                # → ai_build.both_3d.json (cloud_main + qtdock 链路)\n"
         << "  ab --config /path/to/ai_build.json\n"
         << "  ab --no-auto                    # 不自动跑 auto 链\n"
+        << "  ab --auto-exit                  # auto 链全部完成后自动退出 (AI/脚本调用)\n"
         << "  ab --doctor                     # 环境自检\n"
         << "  ab --theme dark|light|solarized|nord  # 强制主题\n"
         << "  ab --help                       # 帮助\n"
+        << "\n"
+        << "task cmd 规则 (重要!):\n"
+        << "  cmd 字段禁止 | tail / | head / | grep / | less 等 pipe. pipe 子进程会缓冲,\n"
+        << "  ab 实时 log 区看不到任何东西. 直接写 cmd, ab 走 QProcess 实时读 stdout/stderr.\n"
+        << "  例: ❌ 'scons ... 2>&1 | tail -30'  ✅ 'scons ...'\n"
+        << "  例外: 'tail -f log' 允许 (持续输出); 真要截行用 'cmd > log 2>&1; echo exit=$?'\n"
         << "\n"
         << "ai_build.json 示例 ui 段:\n"
         << "  {\n"
@@ -91,17 +99,24 @@ int main(int argc, char** argv) {
     QApplication::setApplicationName("ab");
     QApplication::setApplicationVersion("1.0.0");
     QApplication::setOrganizationName("ai_tools");
+    // 2026-10-09 fix-auto-exit-debug: 默认 Qt 在"最后一个窗口关掉"时退出 app.
+    //   AI 调用场景: 副窗口 (inspector/task_runner) 被关时不能让 main 退 — auto 链跑完后
+    //   才用 cfg_.auto_exit 主动 quit. 之前没显式设, 副窗口关掉 → main 跟着退 (就是上次
+    //   用户看到 "auto 链没退但 ab 退" 的根因).
+    QApplication::setQuitOnLastWindowClosed(false);
 
     // 解析参数 (简化)
     QString configPath;
     bool noAuto = false;
     bool doctorMode = false;
+    bool autoExit = false;  // 2026-10-09 加 — auto 链完成后自动退出
     QString forcedTheme;
     for (int i = 1; i < argc; ++i) {
         QString a = argv[i];
         if (a == "--help" || a == "-h") { printHelp(); return 0; }
         if (a == "--doctor") doctorMode = true;
         else if (a == "--no-auto") noAuto = true;
+        else if (a == "--auto-exit") autoExit = true;  // 2026-10-09 加
         else if (a.startsWith("--config=")) configPath = a.mid(9);
         else if (a == "--config" && i + 1 < argc) configPath = argv[++i];
         else if (a.startsWith("--theme=")) forcedTheme = a.mid(8);
@@ -159,6 +174,7 @@ int main(int argc, char** argv) {
     // 加载配置
     AbConfig cfg = AbConfig::load(configPath);
     if (noAuto) cfg.auto_start = false;
+    if (autoExit) cfg.auto_exit = true;  // 2026-10-09 加 — CLI --auto-exit 覆盖配置
     if (!forcedTheme.isEmpty()) cfg.theme = forcedTheme;
 
     std::cerr << "[ab] 配置: " << configPath.toStdString() << "\n";
