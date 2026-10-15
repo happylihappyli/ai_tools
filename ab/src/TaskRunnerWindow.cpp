@@ -2,6 +2,7 @@
 // 2026-09-16: 新增, Step 6/7.
 #include "TaskRunnerWindow.h"
 #include "AbTaskRunner.h"
+#include "AbLogDock.h"   // 2026-10-15: appendColoredLine (ANSI 染色)
 
 #include <QApplication>
 #include <QClipboard>
@@ -447,20 +448,8 @@ QString TaskRunnerWindow::logDirForCurrentTask() const {
 void TaskRunnerWindow::onOutput(const QString& task_name, const QString& line) {
     if (task_name != task_name_) return;
     if (!log_view_) return;
-    // 颜色标记: ▶▶▶ / ✓ / ✗ 头 (仿 ac_task_runner_gui.py)
-    QString esc = line;
-    esc.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
-    QString color;
-    if (line.startsWith("▶▶▶")) color = "#88ccff";
-    else if (line.startsWith("✓")) color = "#88ff88";
-    else if (line.startsWith("✗")) color = "#ff8888";
-    else if (line.startsWith("🚀") || line.contains("===")) color = "#ffaa44";
-
-    if (!color.isEmpty()) {
-        log_view_->appendHtml(QString("<span style=\"color:%1;\">%2</span>").arg(color, esc));
-    } else {
-        log_view_->appendPlainText(line);
-    }
+    // 2026-10-15: 解析 ANSI 颜色 + 剥 ESC 序列 (跟 AbMainWindow 共用 appendColoredLine)
+    appendColoredLine(log_view_, line);
     // 自动滚到底
     QScrollBar* sb = log_view_->verticalScrollBar();
     sb->setValue(sb->maximum());

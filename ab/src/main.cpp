@@ -17,12 +17,61 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QStandardPaths>
+#include <QPixmap>
+#include <QPainter>
+#include <QPainterPath>
+#include <QIcon>
+#include <QFont>
+#include <QPen>
+#include <QBrush>
+#include <QLinearGradient>
 #include <iostream>
 #include "AbConfig.h"
 #include "AbTheme.h"
 #include "AbMainWindow.h"
 
 using namespace ab;
+
+// 2026-10-15: 程序化生成 ab 图标 (任务栏/窗口标题栏用)
+//   64x64, 深底 + 亮蓝渐变 + 白色 "ab" 文字 + 一个对角小扳手 (识别度高)
+static QPixmap makeAbIcon() {
+    QPixmap pm(64, 64);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing, true);
+
+    // 圆角矩形底, 深蓝→亮蓝渐变
+    QLinearGradient g(0, 0, 64, 64);
+    g.setColorAt(0.0, QColor("#1e3a5f"));
+    g.setColorAt(1.0, QColor("#4a90e2"));
+    p.setBrush(QBrush(g));
+    p.setPen(QPen(QColor("#0a1828"), 2));
+    p.drawRoundedRect(QRectF(2, 2, 60, 60), 12, 12);
+
+    // 左上角小三角装饰 (代表"编译输出")
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor("#ffcc44"));
+    QPolygonF tri;
+    tri << QPointF(8, 8) << QPointF(20, 8) << QPointF(8, 20);
+    p.drawPolygon(tri);
+
+    // 中间 "ab" 文字
+    p.setPen(QColor("#ffffff"));
+    QFont f = p.font();
+    f.setBold(true);
+    f.setPointSize(26);
+    p.setFont(f);
+    p.drawText(QRectF(0, 14, 64, 42), Qt::AlignCenter, "ab");
+
+    // 右下小扳手
+    p.setPen(QPen(QColor("#88ff88"), 2));
+    p.setBrush(Qt::NoBrush);
+    p.drawEllipse(QPointF(48, 48), 6, 6);
+    p.drawLine(48, 42, 48, 38);
+
+    p.end();
+    return pm;
+}
 
 static void printHelp() {
     std::cout
@@ -185,6 +234,10 @@ int main(int argc, char** argv) {
 
     // 创建窗口
     ab::AbMainWindow w(cfg, configPath);
+    // 2026-10-15: 设置程序化生成的 ab 图标 (任务栏/标题栏/任务切换器都用这个)
+    //   之前是默认 Qt 图标, 多个 Qt 程序切换时容易混
+    QApplication::setWindowIcon(QIcon(makeAbIcon()));
+    w.setWindowIcon(QIcon(makeAbIcon()));
     w.show();
     return app.exec();
 }

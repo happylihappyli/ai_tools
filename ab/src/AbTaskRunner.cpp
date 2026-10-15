@@ -4,11 +4,23 @@
 #include <QDebug>
 #include <QFileInfo>
 #include <QDir>
+#include <QRegularExpression>
 #include <cstdio>
+#include <unistd.h>  // 2026-10-15: isatty / STDERR_FILENO
 
 namespace ab {
 
-AbTaskRunner::AbTaskRunner(QObject* parent) : QObject(parent) {}
+AbTaskRunner::AbTaskRunner(QObject* parent) : QObject(parent) {
+    // 2026-10-15: 200ms 节流 emit sub_progress (避免日志洪水, GUI 也能跟上)
+    progress_timer_.setSingleShot(true);
+    progress_timer_.setInterval(200);
+    connect(&progress_timer_, &QTimer::timeout, this, [this]() {
+        if (sub_total_ > 0 && sub_idx_ < sub_total_) {
+            emit sub_progress(task_name_, sub_idx_ + 1, sub_total_,
+                              cur_compile_count_, cur_last_file_);
+        }
+    });
+}
 
 AbTaskRunner::~AbTaskRunner() {
     if (proc_) {
@@ -116,6 +128,12 @@ void AbTaskRunner::runNextSubTask() {
     // emit sub_started (idx 从 1 开始, total 是 sub-task 总数)
     emit sub_started(task_name_, sub_idx_ + 1, sub_total_, sub_desc, sub_cmd);
 
+    // 2026-10-15: 重置"编译 N 个文件"实时进度
+    cur_compile_count_ = 0;
+    cur_last_file_.clear();
+    // 立即 emit 一次, 让 UI 立即清掉上次的数字
+    emit sub_progress(task_name_, sub_idx_ + 1, sub_total_, 0, QString());
+
     // 2026-09-16 v10: emit output 标记让实时 log 区立即有内容 (用户反馈"实时 log 没输出")
     //   - 写 desc 行 → onOutput 自动按 ▶▶▶ 标蓝色
     //   - 写 cmd 行 → 用户能 copy 调试
@@ -171,7 +189,65 @@ void AbTaskRunner::onReadyRead() {
         pending_.remove(0, idx + 1);
         if (line.endsWith('\r')) line.chop(1);
         emit output(task_name_, line);
+        // 2026-10-15: 喂给"编译 N 个文件"检测器, 200ms 节流 emit
+        bumpCompileProgress(line);
+
+        // 2026-10-15 fix-tee-stderr: 把子进程原始输出回写到 stderr
+        //   这样 `ab dev --auto-exit 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | tee log | grep ...` 能拿到实时编译日志
+        //   之前编译输出只在 QProcess → onOutput → panel_log_view_ 里, 不进 ab 的 stdout/stderr, sed/grep 拿不到
+        //   只在 stderr 不是 tty (即用户 pipe 到 sed/tee/grep) 时才回写, 避免 GUI 模式下污染用户终端
+        static const int kStderrIsTty = ::isatty(STDERR_FILENO);
+        if (!kStderrIsTty) {
+            QByteArray raw = line.toUtf8();
+            std::fwrite(raw.constData(), 1, raw.size(), stderr);
+            std::fputc('\n', stderr);
+            std::fflush(stderr);
+        }
     }
+}
+
+// 2026-10-15: 喂一行, 内部 regex 匹配, 命中 +1, 启动 200ms 节流 emit
+//   覆盖:
+//     scons:        "Compiling editor/gui/foo.cpp"  / "Compiling shared/lib/bar.cpp"
+//     gcc/g++/clang: "g++ -c foo.cpp -o foo.o"      (cmd 行, 不常见, 但兼容)
+//     ninja/meson:  类似 "Compiling xxx.cpp" / "[42/N] xxx.cpp"
+void AbTaskRunner::bumpCompileProgress(const QString& line) {
+    static const QRegularExpression re_scons(
+        R"(Compiling\s+([^\s].*?\.(?:cpp|cc|cxx|c|c\+\+|m|mm|swift)))",
+        QRegularExpression::CaseInsensitiveOption);
+    // ninja: "[42/100] Compiling xxx.cpp" / "[42/100] CXX xxx.o"
+    static const QRegularExpression re_ninja(
+        R"(\[\s*\d+/\s*\d+\]\s+(?:Compiling|CXX|CC)\s+([^\s].*?))",
+        QRegularExpression::CaseInsensitiveOption);
+    // gcc/clang 直接调: "cc -c foo.cpp ..." — 用 first arg
+    static const QRegularExpression re_gcc(
+        R"((?:gcc|g\+\+|clang|clang\+\+|cc|c\+\+)\s+(?:-[^\s]+\s+)*([^\s-][^\s]*\.(?:cpp|cc|cxx|c))\b)",
+        QRegularExpression::CaseInsensitiveOption);
+
+    auto tryMatch = [&](const QRegularExpression& re) -> QString {
+        auto m = re.match(line);
+        if (m.hasMatch()) {
+            QString f = m.captured(1).trimmed();
+            // 去掉 ANSI 残留
+            f.remove(QRegularExpression(R"(\x1B\[[\d;]*m)"));
+            return f;
+        }
+        return QString();
+    };
+    QString file = tryMatch(re_scons);
+    if (file.isEmpty()) file = tryMatch(re_ninja);
+    if (file.isEmpty()) file = tryMatch(re_gcc);
+    if (file.isEmpty()) return;
+
+    cur_compile_count_++;
+    // 只保留 basename, 太长切 60 字符
+    int slash = file.lastIndexOf('/');
+    QString short_name = (slash >= 0) ? file.mid(slash + 1) : file;
+    if (short_name.size() > 60) short_name = short_name.left(57) + "...";
+    cur_last_file_ = short_name;
+
+    // 启动节流 timer
+    if (!progress_timer_.isActive()) progress_timer_.start();
 }
 
 void AbTaskRunner::onProcFinished(int exit_code, QProcess::ExitStatus /*status*/) {

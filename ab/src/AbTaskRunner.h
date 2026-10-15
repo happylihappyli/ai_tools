@@ -15,6 +15,7 @@
 #include <QProcess>
 #include <QString>
 #include <QStringList>
+#include <QTimer>
 #include <functional>
 #include <chrono>
 
@@ -62,6 +63,13 @@ signals:
     void sub_finished(const QString& task_name, int idx, int total,
                       int rc, double dt_sec);
     void sub_failed(const QString& task_name, int idx, int total);
+    // 2026-10-15: 单 sub-task 内"编译 N 个文件"的实时进度
+    //   task_name/idx/total: 当前 sub-task 位置
+    //   compile_count: 这次 sub-task 已扫到的"编译动作"次数 (scons "Compiling foo.cpp" / gcc -c / clang -c 等)
+    //   last_file: 最近一次匹配到的文件名 (短名, 没匹配就是空)
+    //   每 200ms 节流一次 (避免日志洪水)
+    void sub_progress(const QString& task_name, int idx, int total,
+                      int compile_count, const QString& last_file);
 
 private slots:
     void onReadyRead();
@@ -85,6 +93,12 @@ private:
     std::chrono::steady_clock::time_point sub_t0_;
     QString       working_dir_;
     QStringList   env_;
+
+    // 2026-10-15: 单 sub-task 内"编译 N 个文件"实时进度
+    int           cur_compile_count_ = 0;  // 当前 sub-task 已扫到的"编译动作"次数
+    QString       cur_last_file_;          // 最近一次匹配到的文件名
+    QTimer        progress_timer_;         // 200ms 节流 emit sub_progress
+    void          bumpCompileProgress(const QString& line);  // 喂一行, 内部 regex 匹配
 };
 
 }  // namespace ab

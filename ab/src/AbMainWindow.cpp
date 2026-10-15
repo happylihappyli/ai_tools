@@ -189,6 +189,9 @@ void AbMainWindow::wireRunner() {
             this, &AbMainWindow::onSubFinishedPanel);
     connect(runner_, &AbTaskRunner::sub_failed,
             this, &AbMainWindow::onSubFailedPanel);
+    // 2026-10-15: 单 sub-task 内编译文件数实时进度 (scons / gcc / ninja)
+    connect(runner_, &AbTaskRunner::sub_progress,
+            this, &AbMainWindow::onSubProgress);
 }
 
 void AbMainWindow::buildFromConfig() {
@@ -479,6 +482,17 @@ void AbMainWindow::buildCentralPanel() {
         "background-color: #444; color: #fff; padding: 4px 14px; "
         "border-radius: 4px; border: 1px solid #888;");
     hl->addWidget(panel_lbl_status_);
+
+    // 2026-10-15: 编译进度 label (scons 编译 N 个文件)
+    //   显示 "🔨 编译 12 个 (foo.cpp)" — 200ms 节流, 不抢 status badge
+    panel_lbl_compile_progress_ = new QLabel("");
+    panel_lbl_compile_progress_->setFont(QFont("monospace", 10));
+    panel_lbl_compile_progress_->setStyleSheet(
+        "color: #ffcc44; padding: 2px 8px; "
+        "background-color: #2a2410; border: 1px solid #5a4a20; "
+        "border-radius: 3px;");
+    panel_lbl_compile_progress_->setVisible(false);
+    hl->addWidget(panel_lbl_compile_progress_);
 
     root->addWidget(header_);
 
@@ -1113,19 +1127,9 @@ void AbMainWindow::onOutput(const QString& task_name, const QString& line) {
 
     // 2026-09-16 v3: 写入中央面板右侧 log (主路径)
     if (panel_log_view_) {
-        // 颜色标记 (▶▶▶ / ✓ / ✗ / 🚀)
-        QString esc = line;
-        esc.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
-        QString color;
-        if (line.startsWith("▶▶▶")) color = "#88ccff";
-        else if (line.startsWith("✓")) color = "#88ff88";
-        else if (line.startsWith("✗")) color = "#ff8888";
-        else if (line.startsWith("🚀") || line.contains("===")) color = "#ffaa44";
-        if (!color.isEmpty()) {
-            panel_log_view_->appendHtml(QString("<span style=\"color:%1;\">%2</span>").arg(color, esc));
-        } else {
-            panel_log_view_->appendPlainText(line);
-        }
+        // 2026-10-15: 解析 ANSI 颜色 (scons 等会用 ESC[xxm 染色) + 符号标记
+        //   ▶▶▶ / ✓ / ✗ / 🚀 加颜色; ESC 序列翻译成 <span style="color:...">
+        appendColoredLine(panel_log_view_, line);
         // 自动滚到底
         if (auto* sb = panel_log_view_->verticalScrollBar()) {
             sb->setValue(sb->maximum());
@@ -1147,6 +1151,11 @@ void AbMainWindow::onFinished(const QString& task_name, int exit_code, double el
     log(exit_code == 0 ? "ok" : "err",
         QString("[%1] 退出码 %2  耗时 %3s").arg(task_name).arg(exit_code).arg(elapsed, 0, 'f', 1));
     last_task_exit_code_ = exit_code;  // 2026-10-09 add-auto-exit: 给 runNextInAuto 检查
+
+    // 2026-10-15: task 结束 → 隐藏编译进度 label (避免残留)
+    if (panel_lbl_compile_progress_) {
+        panel_lbl_compile_progress_->setVisible(false);
+    }
 
     // 2026-09-16 v3: 更新中央面板顶部状态 (status badge + elapsed 停 + 进度条满)
     if (panel_lbl_status_) {
@@ -1928,6 +1937,38 @@ void AbMainWindow::onSubFailedPanel(const QString& task_name, int idx, int total
             "background-color: #aa4444; color: #fff; padding: 4px 14px; "
             "border-radius: 4px; border: 1px solid #888; font-weight: bold;");
     }
+    // 失败时清掉编译进度 (避免残留)
+    if (panel_lbl_compile_progress_) {
+        panel_lbl_compile_progress_->setVisible(false);
+    }
+}
+
+// 2026-10-15: 单 sub-task 内"编译 N 个文件"实时进度
+//   - compile_count == 0: 隐藏 (新 sub-task 刚启动, 还没扫到任何编译动作)
+//   - compile_count > 0:  显示 "🔨 编译 12 个 (foo.cpp)"
+//   - 200ms 节流, 不会刷太快
+void AbMainWindow::onSubProgress(const QString& task_name, int /*idx*/, int /*total*/,
+                                 int compile_count, const QString& last_file) {
+    if (task_name != current_task_) return;
+    if (!panel_lbl_compile_progress_) return;
+    if (compile_count <= 0) {
+        panel_lbl_compile_progress_->setVisible(false);
+        panel_lbl_compile_progress_->setText("");
+        return;
+    }
+    QString text;
+    if (last_file.isEmpty()) {
+        text = QString("🔨 已编译 %1 个文件").arg(compile_count);
+    } else {
+        text = QString("🔨 已编译 %1 个 (%2)").arg(compile_count).arg(last_file);
+    }
+    panel_lbl_compile_progress_->setText(text);
+    panel_lbl_compile_progress_->setVisible(true);
+    // 截断超长文本 (label 不会自动 wrap, 用 elide 防止撑爆 header)
+    QFontMetrics fm(panel_lbl_compile_progress_->font());
+    int max_w = 460;
+    QString elided = fm.elidedText(text, Qt::ElideRight, max_w);
+    if (elided != text) panel_lbl_compile_progress_->setText(elided);
 }
 
 // ---- 中央面板 UI 槽 ----

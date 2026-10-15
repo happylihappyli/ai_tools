@@ -98,6 +98,9 @@ public slots:
     void onSubFinishedPanel(const QString& task_name, int idx, int total,
                             int rc, double dt_sec);
     void onSubFailedPanel(const QString& task_name, int idx, int total);
+    // 2026-10-15: 单 sub-task 内"编译 N 个文件"实时进度 (200ms 节流)
+    void onSubProgress(const QString& task_name, int idx, int total,
+                       int compile_count, const QString& last_file);
 
     // 中央面板 UI 槽
     void onPanelTaskListClicked();      // 点击左侧 sub-task 行 → 刷新详情区
@@ -160,6 +163,8 @@ private:
     QLabel*      panel_lbl_title_     = nullptr;
     QLabel*      panel_lbl_elapsed_   = nullptr;
     QLabel*      panel_lbl_status_    = nullptr;
+    // 2026-10-15: 编译进度 (scons "Compiling xxx" 实时累计)
+    QLabel*      panel_lbl_compile_progress_ = nullptr;
     // 进度条
     QProgressBar*panel_progress_      = nullptr;
     // 当前执行区

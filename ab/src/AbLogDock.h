@@ -41,6 +41,12 @@ private:
     QLabel*         status_lbl_   = nullptr;   // 2026-09-09: 黄底状态栏
 };
 
+// 2026-10-15: 解析 ANSI 颜色码 + 剥 ESC 序列, 染到 QPlainTextEdit
+//   scons / 编译工具会用 ESC[xxm 染色, QPlainTextEdit 默认不解析, 之前直接显示为 "[34m..."
+//   拆 ESC[...m 段, SGR 参数翻 hex 颜色, 输出成 <span style="color:..">
+//   符号标记 (▶▶▶ / ✓ / ✗ / 🚀 / ===) 走强制颜色
+void appendColoredLine(QPlainTextEdit* view, const QString& line);
+
 }  // namespace ab
 
 #endif

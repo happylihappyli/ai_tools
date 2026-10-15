@@ -12,6 +12,47 @@
 
 namespace ab {
 
+namespace {
+// SGR 参数 -> #RRGGBB (前景色). 0/未识别 = 默认
+QString sgrToColor(const QStringList& params) {
+    int r = -1, g = -1, b = -1;
+    bool bold = false;
+    for (const QString& p : params) {
+        bool ok = false;
+        int v = p.toInt(&ok, 10);
+        if (!ok) continue;
+        if (v == 0) { r = g = b = -1; bold = false; }
+        else if (v == 1) bold = true;
+        else if (v >= 30 && v <= 37) {
+            // 30 黑 31 红 32 绿 33 黄 34 蓝 35 品红 36 青 37 白
+            static const int k[8][3] = {
+                {0x10, 0x10, 0x10}, {0xcc, 0x44, 0x44}, {0x44, 0xcc, 0x44},
+                {0xcc, 0x99, 0x33}, {0x44, 0x88, 0xcc}, {0xaa, 0x66, 0xaa},
+                {0x44, 0xaa, 0xaa}, {0xcc, 0xcc, 0xcc},
+            };
+            int i = v - 30;
+            r = k[i][0]; g = k[i][1]; b = k[i][2];
+        } else if (v >= 90 && v <= 97) {
+            // 90 亮黑 91 亮红 ... 97 亮白
+            static const int k[8][3] = {
+                {0x66, 0x66, 0x66}, {0xff, 0x55, 0x55}, {0x55, 0xff, 0x55},
+                {0xff, 0xcc, 0x55}, {0x55, 0xaa, 0xff}, {0xff, 0x88, 0xff},
+                {0x55, 0xff, 0xff}, {0xff, 0xff, 0xff},
+            };
+            int i = v - 90;
+            r = k[i][0]; g = k[i][1]; b = k[i][2];
+        }
+    }
+    Q_UNUSED(bold);
+    if (r < 0) return QString();
+    return QString("#%1%2%3")
+        .arg(r, 2, 16, QChar('0'))
+        .arg(g, 2, 16, QChar('0'))
+        .arg(b, 2, 16, QChar('0'));
+}
+
+}  // namespace
+
 AbLogDock::AbLogDock(QWidget* parent) : QDockWidget("操作日志", parent) {
     QWidget* w = new QWidget(this);
     QVBoxLayout* layout = new QVBoxLayout(w);
@@ -171,6 +212,80 @@ void AbLogDock::onCopyAllClicked() {
 // 2026-09-09: 复制 scons/build 命令 — 占位 (跨 dock 拿不到当前选中 task, 只提示)
 void AbLogDock::onCopyCmdClicked() {
     if (status_lbl_) status_lbl_->setText("复制命令功能见 build_poc_a_stage3_gui.py (POC-A Stage 3 链)");
+}
+
+// 2026-10-15: 解析 ANSI 颜色码 + 剥 ESC 序列, 染到 QPlainTextEdit
+//   scons / 编译工具会用 ESC[xxm 染色, QPlainTextEdit 默认不解析, 之前直接显示为 "[34m..."
+//   拆 ESC[...m 段, SGR 参数翻 QColor, 用 QTextCursor 插入带 QTextCharFormat 的文本
+//   符号标记 (▶▶▶ / ✓ / ✗ / 🚀 / ===) 走强制颜色
+void appendColoredLine(QPlainTextEdit* view, const QString& line) {
+    if (!view) return;
+
+    // 符号强制颜色 (▶▶▶ / ✓ / ✗ / 🚀 / ===) - 不管 ANSI, 始终上色
+    QString symbolColorHex;
+    if (line.startsWith("▶▶▶")) symbolColorHex = "#88ccff";
+    else if (line.startsWith("✓")) symbolColorHex = "#88ff88";
+    else if (line.startsWith("✗")) symbolColorHex = "#ff8888";
+    else if (line.startsWith("🚀") || line.contains("===")) symbolColorHex = "#ffaa44";
+
+    // 拆 ESC[...m 段
+    // 形态: \x1B\[ 参数(;参数)* m   (允许空参数; m 必现)
+    static const QRegularExpression esc_re(
+        "\x1B\\[([\\d;]*)m", QRegularExpression::DotMatchesEverythingOption);
+
+    struct Seg { QString colorHex; QString text; };
+    QList<Seg> segs;
+    QString curText;
+    int last = 0;
+    QString currentColorHex = symbolColorHex;
+
+    auto it = esc_re.globalMatch(line);
+    while (it.hasNext()) {
+        auto m = it.next();
+        int s = m.capturedStart();
+        int e = m.capturedEnd();
+        curText += line.mid(last, s - last);
+        if (!curText.isEmpty()) {
+            segs.append({currentColorHex, curText});
+            curText.clear();
+        }
+        QString params = m.captured(1);
+        QStringList ps = params.split(';', Qt::SkipEmptyParts);
+        if (ps.isEmpty()) ps << "0";
+        QString c = sgrToColor(ps);
+        if (!c.isEmpty()) currentColorHex = c;
+        else if (params == "0" || params.isEmpty()) currentColorHex = symbolColorHex;
+        last = e;
+    }
+    curText += line.mid(last);
+    if (!curText.isEmpty()) {
+        segs.append({currentColorHex, curText});
+    }
+
+    // 没任何段 (空行) — 走 plain
+    if (segs.isEmpty()) {
+        view->appendPlainText(line);
+        return;
+    }
+
+    // 全段同色 + 无符号色强制 -> fast path
+    if (segs.size() == 1 && segs[0].colorHex == symbolColorHex && symbolColorHex.isEmpty()) {
+        view->appendPlainText(segs[0].text + "\n");
+        return;
+    }
+
+    // 富文本: QTextCursor + QTextCharFormat
+    QTextCursor cur = view->textCursor();
+    cur.movePosition(QTextCursor::End);
+    for (const Seg& sg : segs) {
+        QTextCharFormat fmt;
+        if (!sg.colorHex.isEmpty()) fmt.setForeground(QColor(sg.colorHex));
+        cur.insertText(sg.text, fmt);
+    }
+    cur.insertText("\n");
+    // 自动滚到底
+    QScrollBar* sb = view->verticalScrollBar();
+    if (sb) sb->setValue(sb->maximum());
 }
 
 }  // namespace ab
