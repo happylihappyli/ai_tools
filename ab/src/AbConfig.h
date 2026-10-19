@@ -96,6 +96,11 @@ struct AbConfig {
     bool    show_log_dock = true;
     bool    disable_built_in_toolbar = false;  // 2026-09-18 加 — true 时 buildToolbar 只显 ui.toolbar 自定义按钮, 不加 F5/F6/F7/run_after_build 等默认按钮
     bool    auto_exit = false;  // 2026-10-09 加 — auto 链全部完成后自动退出 (适合 AI/脚本调用)
+    // 2026-10-19 加 — 启动时弹一个大字体模态提示窗口 (用户要求). 字符串 / list 都行.
+    //   例如: "编译完成后会自动启动 fork engine editor. 启动需 X11 GUI."
+    //   或 list: [{"title": "...", "body": "..."}, ...]
+    QStringList startup_prompts;
+    int     startup_prompt_font_pt = 28;  // 大字体 pt (默认 28)
 
     std::vector<AbMenuDef> menus;
     std::vector<AbButtonDef> toolbar;

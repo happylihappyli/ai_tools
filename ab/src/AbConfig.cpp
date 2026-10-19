@@ -84,6 +84,28 @@ AbConfig AbConfig::load(const QString& path) {
         cfg.disable_built_in_toolbar = ui["disable_built_in_toolbar"].toBool(cfg.disable_built_in_toolbar);  // 2026-09-18
         cfg.auto_exit = ui["auto_exit"].toBool(cfg.auto_exit);  // 2026-10-09 加 — 配 ui.auto_exit=true 也能在没 --auto-exit 参数时自动退出
 
+        // 2026-10-19 加 startup_prompts — 启动时弹大字体模态窗口. 字符串或 list 都行.
+        QJsonValue promptsVal = ui["prompt"];
+        if (promptsVal.isArray()) {
+            // list 格式 — 每项是字符串或 {"title": ..., "body": ...}
+            QJsonArray promptArr = promptsVal.toArray();
+            for (const auto& pv : promptArr) {
+                if (pv.isString()) {
+                    cfg.startup_prompts << pv.toString();
+                } else if (pv.isObject()) {
+                    QJsonObject po = pv.toObject();
+                    QString title = po["title"].toString();
+                    QString body  = po["body"].toString();
+                    cfg.startup_prompts << (title.isEmpty() ? body : (title + "\n\n" + body));
+                }
+            }
+        } else if (promptsVal.isString()) {
+            // 单字符串 — 自动按 \n 拆成多段
+            QString s = promptsVal.toString();
+            cfg.startup_prompts = s.split('\n', Qt::SkipEmptyParts);
+        }
+        cfg.startup_prompt_font_pt = ui["prompt_font_pt"].toInt(cfg.startup_prompt_font_pt);
+
         // window
         QJsonObject win = ui["window"].toObject();
         if (!win.isEmpty()) {

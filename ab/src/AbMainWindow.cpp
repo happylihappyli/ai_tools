@@ -135,6 +135,10 @@ AbMainWindow::AbMainWindow(const AbConfig& cfg, const QString& configPath, QWidg
     log("info", "💡 任务列表: 顶部 [任务检查器] → [📋 任务] tab, 双击行直接跑");
     log("info", "💡 操作日志: 底部面板, 编译/任务输出实时滚出 (Ctrl+Shift+L 切换)");
 
+    // 2026-10-19 startup-prompt: 启动后先弹大字体模态提示 (用户在 ai_build.json 里配的).
+    //   必须在 auto_start 跑之前 — 让用户先点 OK 看完提示, 再开始编译.
+    showStartupPrompts();
+
     // auto_start
     // 2026-09-16 v7: 强制 cerr log, 确认 QTimer 真触发 + cfg_.auto_start 值
     std::fprintf(stderr, "[ab] auto_start=%s, auto_chain=[%s], schedule QTimer 300ms → onRunAuto\n",
@@ -235,6 +239,38 @@ void AbMainWindow::buildFromConfig() {
         log("ok", "[F5] 重读 ai_build.json...");
         reloadConfig();
     });
+}
+
+// 2026-10-19 startup-prompt-window (用户反馈需要): 启动后弹大字体模态窗口
+//   显示 ai_build.json 的 ui.prompt 字段. 每段一个 QMessageBox, 大字体 (默认 28pt),
+//   用户点 OK 跳下一段 (或关闭). 没有 prompt 时不弹.
+void AbMainWindow::showStartupPrompts() {
+    if (cfg_.startup_prompts.isEmpty()) {
+        return;
+    }
+    int font_pt = cfg_.startup_prompt_font_pt > 0 ? cfg_.startup_prompt_font_pt : 28;
+    for (int i = 0; i < cfg_.startup_prompts.size(); ++i) {
+        const QString& text = cfg_.startup_prompts[i];
+        QString title = QString("⚡ %1 (%3/%4)")
+            .arg(i + 1 == 1 ? "启动提示" : "启动提示")
+            .arg(i + 1)
+            .arg(cfg_.startup_prompts.size());
+        QMessageBox box(this);
+        box.setWindowTitle(title);
+        box.setText(text);
+        box.setIcon(QMessageBox::Information);
+        // 大字体: QMessageBox 默认 QLabel 是 message 字段, 改 font.
+        QFont f = box.font();
+        f.setPointSize(font_pt);
+        f.setBold(true);
+        box.setFont(f);
+        // 留出足够空间给大字体
+        box.setMinimumSize(600, 200);
+        box.adjustSize();
+        box.exec();
+    }
+    log("ok", QString("[startup-prompt] 显示 %1 段大字体提示 (用户已点 OK)")
+        .arg(cfg_.startup_prompts.size()));
 }
 
 // 2026-09-02: 框架内置通用菜单 (所有调试程序都需要)

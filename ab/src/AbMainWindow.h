@@ -127,6 +127,9 @@ private:
     void buildCentralPanel();   // 2026-09-16 v3: 新中央面板 (顶部 + split + 详情 + 底部按钮)
     void buildStatusBar();
     void wireRunner();
+    // 2026-10-19 加 — 启动时弹大字体模态窗口显示 ai_build.json 的 startup_prompts.
+    //   每段一个 dialog (按 OK 跳下一段), 字体大小 startup_prompt_font_pt (默认 28).
+    void showStartupPrompts();
 
     void enableRunCloudButton(bool en);
     QString findRunBinary() const;
