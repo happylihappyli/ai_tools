@@ -25,12 +25,11 @@ ab --config /path/to/ai_build.json      # 显式指定 json 文件
 | `ab --no-auto`   | ✅        | ❌ (等手动) | ✅ (常驻) |
 | `ab --task X`    | ✅        | ❌          | ✅ (持续) |
 
-### `ab --no-auto` 适用场景
-- 改完 ai_build.json 想先看 task 列表 + 工具栏, 手动触发单个 task
-- 本地调试, agent 还没准备好 auto 链
-- 已经跑了 `ab` 进程, 不要重复启动 (`--no-auto` 是首次启动手动模式)
-
-`--no-auto` 不执行 task — 仅显示 UI + 加载 cfg. 用户必须点 toolbar 按钮 / 双击任务行 / 按快捷键触发 task.
+### `ab --no-auto` 适用场景 (用户要求: 尽量别用)
+- ❌ **尽量别用 `--no-auto`**:用户希望启动 ab 后 auto 链自动跑, 不要 `--no-auto` 手动模式.
+- ✅ 默认用 `ab` 或 `ab --auto-exit` — auto 链自动跑, 不用人工触发.
+- 唯一例外: 临时测试单 task 不跑 chain 时, 临时用 `ab --task X`.
+- ⚠️ 用户原话: 'ab --no-auto 最好别用, 如果要我启动什么'
 
 ## auto 链 (auto_chain)
 `ai_build.json` 的 `auto` 字段定义 task 串行列表. 每跑完一个自动跑下一个:
@@ -64,6 +63,18 @@ ab GUI 左边 [📋 任务] tab 看每个 task 的状态 (⏸/🟡/✓/✗), [�
 
 3 个 sub-cmd 串行跑, 左边 [🔧 sub-task] tab 显示成 3 行 (running/ok/err 状态). 失败立即停.
 
+## 启动提示窗口 (startup_prompt)
+ab 启动后, 读取 `ai_build.json` 的 `ui.prompt` 字段, **弹大字体模态窗口**显示提示 (默认 28pt). 用户点 OK 后再进 auto_start 跑 task chain. 没有 `ui.prompt` 时不弹.
+
+`ui.prompt` 格式支持:
+- 单字符串 (按 \n 拆段)
+- list[str]: 每段一个 dialog
+- list[dict]: `{"title": "...", "body": "..."}` — title + body 组合
+
+`ui.prompt_font_pt`: 大字体 pt (默认 28).
+
+**典型用法**: 编译说明 (auto 链 3 步), 操作提示 (双击任务行跑子任务), X11 提示 (缺 X11 session 时 editor 不会显示). 等等.
+
 ## 关键优势
 - 实时滚动 stdout/stderr (不缓冲)
 - **spd-say 自动 TTS 提示音** (无需 agent 自己播)
@@ -84,5 +95,5 @@ ab GUI 左边 [📋 任务] tab 看每个 task 的状态 (⏸/🟡/✓/✗), [�
 - ❌ 长编译走 `nohup scons ... &` 后看 log 文件 — 用户看不到进度
 - ❌ 同一个项目跑多次 `ab` 进程 (重复启动 GUI 浪费资源)
 - ❌ 编译完后 agent 自己 cp binary + 启 godot (用户看不到 TTS, 不知道编译完成)
-- ❌ 期待 `ab --no-auto` 跑任务 — 它只加载, 必须手动触发
+- ❌ 期待 `ab --no-auto` 跑任务 — 它只加载, 必须手动触发 (用户要求: 尽量别用 --no-auto)
 - ❌ 用 `ab --auto-exit` 还要在 sandbox 里跑 godot (X11 会断, 必须让用户手动启)
