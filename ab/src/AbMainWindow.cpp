@@ -438,16 +438,11 @@ void AbMainWindow::buildCentralPanel() {
     panel_toolbar_ = new QToolBar("操作", this);
     panel_toolbar_->setMovable(false);
     panel_toolbar_->setIconSize(QSize(16, 16));
-    panel_toolbar_->setStyleSheet(
-        "QToolBar { background-color: #2a2a2a; border-bottom: 1px solid #444; spacing: 4px; padding: 2px; }"
-        "QToolButton { padding: 4px 8px; border-radius: 3px; }"
-        "QToolButton:hover { background-color: #3a3a3a; }");
+    // 2026-10-19 fix-theme: 让主题 QSS 接管 toolbar 背景 (不硬编码)
 
     panel_btn_stop_ = new QPushButton("⏹ Stop");
-    panel_btn_stop_->setStyleSheet(
-        "QPushButton { background-color: #aa4444; color: #fff; padding: 4px 10px; "
-        "font-weight: bold; border-radius: 3px; }"
-        "QPushButton:disabled { background-color: #444; color: #888; }");
+    // Stop 按钮用 role=danger (QSS 已配 QPushButton[role="danger"])
+    panel_btn_stop_->setProperty("role", "danger");
     connect(panel_btn_stop_, &QPushButton::clicked, this, &AbMainWindow::onPanelStopClicked);
     panel_toolbar_->addWidget(panel_btn_stop_);
 
@@ -455,10 +450,13 @@ void AbMainWindow::buildCentralPanel() {
     addToolBar(Qt::TopToolBarArea, panel_toolbar_);
 
     // ====== 顶部 header: 任务名 + status badge + elapsed ======
+    // 2026-10-19 fix-theme: 不要硬编码 background-color, 让主题 QSS 接管
+    //   之前硬编码 #1a1a1a 等, 导致 light/solarized/nord 主题切过来时这块还是黑底
     QFrame* header_ = new QFrame();
     header_->setFrameShape(QFrame::Shape::StyledPanel);
+    // 仅保留边框/圆角/padding, 背景由主题决定
     header_->setStyleSheet(
-        "QFrame { background-color: #1a1a1a; border: 1px solid #444; "
+        "QFrame { border: 1px solid palette(midlight); "
         "border-radius: 4px; padding: 6px; }");
     QHBoxLayout* hl = new QHBoxLayout(header_);
     hl->setContentsMargins(8, 4, 8, 4);
@@ -466,31 +464,26 @@ void AbMainWindow::buildCentralPanel() {
 
     panel_lbl_title_ = new QLabel("⏸ 暂无任务");
     panel_lbl_title_->setFont(QFont("sans-serif", 14, QFont::Weight::Bold));
-    panel_lbl_title_->setStyleSheet("color: #88ccff;");
+    // 标题色跟随主题 (蓝色强调), 但 QSS 全局有 QLabel, 这里只覆盖需要强调的
     hl->addWidget(panel_lbl_title_);
 
     hl->addStretch();
 
     panel_lbl_elapsed_ = new QLabel("⏱ 00:00");
     panel_lbl_elapsed_->setFont(QFont("monospace", 11));
-    panel_lbl_elapsed_->setStyleSheet("color: #aaa;");
     hl->addWidget(panel_lbl_elapsed_);
 
     panel_lbl_status_ = new QLabel("⏳ 等待启动");
     panel_lbl_status_->setFont(QFont("sans-serif", 11, QFont::Weight::Bold));
-    panel_lbl_status_->setStyleSheet(
-        "background-color: #444; color: #fff; padding: 4px 14px; "
-        "border-radius: 4px; border: 1px solid #888;");
+    // status badge 用 dynamicProperty [level] 让主题 QSS 接管 (ok/err/warn/info 已在 QSS)
+    panel_lbl_status_->setProperty("level", "info");
     hl->addWidget(panel_lbl_status_);
 
     // 2026-10-15: 编译进度 label (scons 编译 N 个文件)
     //   显示 "🔨 编译 12 个 (foo.cpp)" — 200ms 节流, 不抢 status badge
     panel_lbl_compile_progress_ = new QLabel("");
     panel_lbl_compile_progress_->setFont(QFont("monospace", 10));
-    panel_lbl_compile_progress_->setStyleSheet(
-        "color: #ffcc44; padding: 2px 8px; "
-        "background-color: #2a2410; border: 1px solid #5a4a20; "
-        "border-radius: 3px;");
+    panel_lbl_compile_progress_->setProperty("level", "warn");
     panel_lbl_compile_progress_->setVisible(false);
     hl->addWidget(panel_lbl_compile_progress_);
 
@@ -502,17 +495,15 @@ void AbMainWindow::buildCentralPanel() {
     panel_progress_->setValue(0);
     panel_progress_->setFormat("0 / 0  (sub-task)");
     panel_progress_->setFixedHeight(20);
-    panel_progress_->setStyleSheet(
-        "QProgressBar { border: 1px solid #444; border-radius: 3px; "
-        "background-color: #1a1a1a; color: #fff; text-align: center; }"
-        "QProgressBar::chunk { background-color: #4682b4; }");
+    // 让主题 QSS 接管 (QProgressBar 已在 QSS)
     root->addWidget(panel_progress_);
 
     // ====== ⚡ 当前执行 区 ======
     panel_current_box_ = new QFrame();
     panel_current_box_->setFrameShape(QFrame::Shape::StyledPanel);
+    // 仅保留边框, 不硬编码背景 (让主题决定)
     panel_current_box_->setStyleSheet(
-        "QFrame { background-color: #1a2a3a; border: 2px solid #4682b4; "
+        "QFrame { border: 2px solid palette(highlight); "
         "border-radius: 4px; padding: 4px; }");
     QVBoxLayout* cb_layout = new QVBoxLayout(panel_current_box_);
     cb_layout->setContentsMargins(8, 4, 8, 4);
@@ -520,17 +511,13 @@ void AbMainWindow::buildCentralPanel() {
     QHBoxLayout* cur_top = new QHBoxLayout();
     QLabel* cur_title = new QLabel("⚡ 当前执行");
     cur_title->setFont(QFont("sans-serif", 11, QFont::Weight::Bold));
-    cur_title->setStyleSheet("color: #88ccff;");
     cur_top->addWidget(cur_title);
     panel_lbl_current_idx_ = new QLabel("—");
     panel_lbl_current_idx_->setFont(QFont("monospace", 12, QFont::Weight::Bold));
-    panel_lbl_current_idx_->setStyleSheet(
-        "background-color: #4682b4; color: #fff; padding: 2px 8px; "
-        "border-radius: 3px;");
+    panel_lbl_current_idx_->setProperty("level", "info");
     cur_top->addWidget(panel_lbl_current_idx_);
     panel_lbl_current_dt_ = new QLabel("⏱ 0s");
     panel_lbl_current_dt_->setFont(QFont("monospace", 10));
-    panel_lbl_current_dt_->setStyleSheet("color: #aaa;");
     cur_top->addWidget(panel_lbl_current_dt_);
     cur_top->addStretch();
     cb_layout->addLayout(cur_top);
@@ -539,22 +526,22 @@ void AbMainWindow::buildCentralPanel() {
     panel_txt_current_cmd_->setFont(QFont("monospace", 10));
     panel_txt_current_cmd_->setMaximumHeight(70);
     panel_txt_current_cmd_->setLineWrapMode(QPlainTextEdit::LineWrapMode::WidgetWidth);
-    panel_txt_current_cmd_->setStyleSheet(
-        "QPlainTextEdit { background-color: #0a1828; color: #ffeeaa; "
-        "border: 1px solid #2a4a6a; padding: 4px; }");
+    // 跟随主题 (QSS 已配 QPlainTextEdit)
     panel_txt_current_cmd_->setPlaceholderText("(等待 sub-task 开始)");
     cb_layout->addWidget(panel_txt_current_cmd_);
     // 注: panel_current_box_ 加入 QTabWidget (panel_task_tab_) 在下方, 不直接 addWidget 到 root
 
     // ====== 中间 split: 左 sub-task 列表 + 右 实时 log ======
+    // 2026-10-19 fix-splitter-ratio: 用户要求"宽度可以占2/3, 左边占1/3" → 左:右 = 1:2
     panel_splitter_ = new QSplitter(Qt::Orientation::Horizontal);
-    panel_splitter_->setSizes({400, 1000});
+    panel_splitter_->setStretchFactor(0, 1);  // 左
+    panel_splitter_->setStretchFactor(1, 2);  // 右 (2/3)
+    panel_splitter_->setSizes({400, 800});     // 1:2 初始比例
 
     QWidget* left = new QWidget();
     QVBoxLayout* ll = new QVBoxLayout(left);
     ll->setContentsMargins(0, 0, 0, 0);
     QLabel* lbl_left_title = new QLabel("📋 Sub-task 进度");
-    lbl_left_title->setStyleSheet("color: #88ccff; font-weight: bold;");
     ll->addWidget(lbl_left_title);
     panel_sub_list_ = new QListWidget();
     panel_sub_list_->setFont(QFont("monospace", 10));
@@ -562,10 +549,7 @@ void AbMainWindow::buildCentralPanel() {
     //   minHeight = 5 行 * 28px + padding ≈ 160px, 让 sub-task 列表默认就够 5 行可见
     //   (窗口可拉高显示更多行)
     panel_sub_list_->setMinimumHeight(160);
-    panel_sub_list_->setStyleSheet(
-        "QListWidget { background-color: #1a1a1a; }"
-        "QListWidget::item { padding: 4px; border-bottom: 1px solid #2a2a2a; }"
-        "QListWidget::item:selected { background-color: #4682b4; }");
+    // 跟随主题 QSS (QListWidget 已在 QSS)
     connect(panel_sub_list_, &QListWidget::itemClicked,
             this, [this](QListWidgetItem*) { onPanelTaskListClicked(); });
     connect(panel_sub_list_, &QListWidget::currentItemChanged,
@@ -578,16 +562,14 @@ void AbMainWindow::buildCentralPanel() {
     rl->setContentsMargins(0, 0, 0, 0);
     QHBoxLayout* log_header = new QHBoxLayout();
     panel_lbl_log_summary_ = new QLabel("📄 实时 log (stdout, 0 行)");
-    panel_lbl_log_summary_->setStyleSheet("color: #88ccff; font-weight: bold;");
     log_header->addWidget(panel_lbl_log_summary_);
     log_header->addStretch();
     rl->addLayout(log_header);
     panel_log_view_ = new QPlainTextEdit();
     panel_log_view_->setReadOnly(true);
     panel_log_view_->setFont(QFont("monospace", 10));
-    panel_log_view_->setStyleSheet(
-        "QPlainTextEdit { background-color: #0a0a0a; color: #cccccc; "
-        "border: 1px solid #333; }");
+    // 2026-10-19 fix-theme: 不要硬编码深色背景, 让主题 QSS 接管
+    //   之前 #0a0a0a 黑色背景 + #cccccc 浅灰字, light 主题切过来 log 区也是黑底黑字反差乱
     panel_log_view_->setMaximumBlockCount(10000);
     rl->addWidget(panel_log_view_);
     panel_splitter_->addWidget(right);
@@ -595,6 +577,7 @@ void AbMainWindow::buildCentralPanel() {
     root->addWidget(panel_splitter_, /*stretch=*/1);
 
     // ====== 详情区 ======
+    // 2026-10-19: 详情面板默认隐藏 (用户点击 sub-task 才显示), 加关闭按钮
     panel_detail_box_ = new QGroupBox("📜 选中 sub-task 详情");
     QVBoxLayout* dl = new QVBoxLayout(panel_detail_box_);
     dl->setContentsMargins(6, 4, 6, 4);
@@ -602,7 +585,6 @@ void AbMainWindow::buildCentralPanel() {
     QHBoxLayout* dt = new QHBoxLayout();
     panel_lbl_detail_meta_ = new QLabel("(未选中 sub-task)");
     panel_lbl_detail_meta_->setFont(QFont("monospace", 10, QFont::Weight::Bold));
-    panel_lbl_detail_meta_->setStyleSheet("color: #88ccff;");
     dt->addWidget(panel_lbl_detail_meta_);
     dt->addStretch();
     panel_btn_open_sub_log_ = new QPushButton("📂 打开 sub-task log");
@@ -632,6 +614,14 @@ void AbMainWindow::buildCentralPanel() {
         log("ok", "✓ 完整命令已复制到剪贴板");
     });
     dt->addWidget(panel_btn_copy_sub_cmd_);
+    // 2026-10-19: 关闭按钮 — 隐藏整个详情面板
+    panel_btn_close_detail_ = new QPushButton("✕");
+    panel_btn_close_detail_->setFixedSize(24, 24);
+    panel_btn_close_detail_->setToolTip("关闭详情面板 (点击左侧 sub-task 重新打开)");
+    connect(panel_btn_close_detail_, &QPushButton::clicked, this, [this]() {
+        if (panel_detail_box_) panel_detail_box_->setVisible(false);
+    });
+    dt->addWidget(panel_btn_close_detail_);
     dl->addLayout(dt);
     panel_txt_detail_cmd_ = new QPlainTextEdit();
     panel_txt_detail_cmd_->setReadOnly(true);
@@ -640,11 +630,11 @@ void AbMainWindow::buildCentralPanel() {
     panel_txt_detail_cmd_->setMaximumHeight(280);
     panel_txt_detail_cmd_->setLineWrapMode(QPlainTextEdit::LineWrapMode::WidgetWidth);
     panel_txt_detail_cmd_->setPlaceholderText("(点击左侧 sub-task 行, 显示完整命令)");
-    panel_txt_detail_cmd_->setStyleSheet(
-        "QPlainTextEdit { background-color: #0a0a0a; color: #aaffaa; "
-        "border: 1px solid #333; padding: 4px; }");
+    // 跟随主题 QSS
     panel_txt_detail_cmd_->setVerticalScrollBarPolicy(Qt::ScrollBarPolicy::ScrollBarAlwaysOn);
     dl->addWidget(panel_txt_detail_cmd_);
+    // 2026-10-19: 默认隐藏 — 用户点击 sub-task 才显示
+    panel_detail_box_->setVisible(false);
     root->addWidget(panel_detail_box_);
 
     // 2026-09-16 v7: 底部按钮行已移至顶部 QToolBar (panel_toolbar_), 这里只留 stretch
@@ -659,13 +649,9 @@ void AbMainWindow::buildCentralPanel() {
     panel_current_dt_timer_->setInterval(500);
     connect(panel_current_dt_timer_, &QTimer::timeout, this, &AbMainWindow::onPanelUpdateCurrentDt);
 
-    // 暗主题
-    setStyleSheet(
-        "QMainWindow, QWidget { background-color: #2b2b2b; color: #ddd; }"
-        "QGroupBox { border: 1px solid #444; margin-top: 8px; padding-top: 6px; }"
-        "QPushButton { background-color: #3a3a3a; color: #ddd; padding: 4px 10px; "
-                      "border: 1px solid #555; border-radius: 3px; }"
-        "QPushButton:hover { background-color: #4a4a4a; }");
+    // 2026-10-19 fix-theme: 移除硬编码的暗主题 QSS, 让 AbTheme 全局 QSS 接管
+    //   之前这行强制覆盖 mainwindow 的全局样式, 主题切换不生效
+    // setStyleSheet(...暗主题...) 已删除
 
     // 2026-09-16 v3: log dock 已移除, no-op (log 在中央面板)
 }
@@ -680,7 +666,7 @@ void AbMainWindow::buildStatusBar() {
     QString auto_text = cfg_.auto_chain.isEmpty() ? "(无)" : cfg_.auto_chain.join(" → ");
     sb_proj_ = new QLabel(QString("📁 %1  |  auto: %2")
                           .arg(cfg_.cwd, auto_text));
-    sb_proj_->setStyleSheet("color: #888; font-size: 11px;");
+    // 2026-10-19 fix-theme: 让主题 QSS 接管状态栏颜色
     statusbar_->addWidget(sb_proj_, 1);  // 拉伸占 1 份
 
     // 2) 中: 动态 log 状态 (✗/✓ msg, 被 log() 覆盖)
@@ -691,7 +677,7 @@ void AbMainWindow::buildStatusBar() {
     //   默认 "渲染模式: —" 灰, 启动 cloud_main (Vulkan) → "渲染模式: Vulkan (Forward+)" 蓝,
     //   启动兼容模式 → "渲染模式: OpenGL3 (Compatibility)" 橙. 让用户一眼看到当前是哪种渲染.
     sb_render_ = new QLabel("渲染模式: —");
-    sb_render_->setStyleSheet("color: #555; font-size: 12px; padding: 0 8px; font-weight: bold;");
+    sb_render_->setProperty("level", "info");  // 走 QSS 默认蓝色 (跟之前 #2980b9 类似)
     statusbar_->addPermanentWidget(sb_render_);
 
     // 3) 右: Qt/主题 (进度条/进度文字 2026-09-16 v3 移到了中央面板顶部 header)
@@ -1161,18 +1147,19 @@ void AbMainWindow::onFinished(const QString& task_name, int exit_code, double el
     if (panel_lbl_status_) {
         if (exit_code == 0) {
             panel_lbl_status_->setText("✓ Done");
-            panel_lbl_status_->setStyleSheet(
-                "background-color: #44aa44; color: #fff; padding: 4px 14px; "
-                "border-radius: 4px; border: 1px solid #888; font-weight: bold;");
+            // 2026-10-19 fix-theme: 用 dynamicProperty level 让 QSS 接管, 不硬编码绿
+            panel_lbl_status_->setProperty("level", "ok");
+            panel_lbl_status_->style()->unpolish(panel_lbl_status_);
+            panel_lbl_status_->style()->polish(panel_lbl_status_);
             if (panel_progress_) {
                 panel_progress_->setValue(panel_progress_->maximum());
                 panel_progress_->setFormat(QString("✓ %1 / %1").arg(panel_progress_->maximum()));
             }
         } else {
             panel_lbl_status_->setText(QString("✗ Fail (rc=%1)").arg(exit_code));
-            panel_lbl_status_->setStyleSheet(
-                "background-color: #aa4444; color: #fff; padding: 4px 14px; "
-                "border-radius: 4px; border: 1px solid #888; font-weight: bold;");
+            panel_lbl_status_->setProperty("level", "err");
+            panel_lbl_status_->style()->unpolish(panel_lbl_status_);
+            panel_lbl_status_->style()->polish(panel_lbl_status_);
         }
     }
     if (panel_elapsed_timer_) panel_elapsed_timer_->stop();
@@ -1377,7 +1364,10 @@ void AbMainWindow::onRunCloud() {
         // 2026-09-16 fix71: 状态栏显示渲染模式
         if (sb_render_) {
             sb_render_->setText("渲染模式: Vulkan (Forward+)");
-            sb_render_->setStyleSheet("color: #2980b9; font-size: 12px; padding: 0 8px; font-weight: bold;");
+            // 2026-10-19 fix-theme: 用 level=info 让 QSS 接管蓝色
+            sb_render_->setProperty("level", "info");
+            sb_render_->style()->unpolish(sb_render_);
+            sb_render_->style()->polish(sb_render_);
         }
         speakTextAsync(QString("启动 %1").arg(QFileInfo(cloud_binary_).fileName()));
     } else {
@@ -1439,7 +1429,10 @@ void AbMainWindow::onRunCloudGL() {
             // 2026-09-16 fix71: 状态栏显示渲染模式
             if (sb_render_) {
                 sb_render_->setText("渲染模式: OpenGL3 (Compatibility)");
-                sb_render_->setStyleSheet("color: #e67e22; font-size: 12px; padding: 0 8px; font-weight: bold;");
+                // 2026-10-19 fix-theme: 用 level=warn 让 QSS 接管橙色
+                sb_render_->setProperty("level", "warn");
+                sb_render_->style()->unpolish(sb_render_);
+                sb_render_->style()->polish(sb_render_);
             }
             speakTextAsync(QString("启动兼容模式"));
             return;
@@ -1758,13 +1751,14 @@ void AbMainWindow::panelResetUi(int total) {
     // 顶部 header
     if (panel_lbl_title_) {
         panel_lbl_title_->setText(panel_task_name_.isEmpty() ? "⏸ 暂无任务" : panel_task_name_);
-        panel_lbl_title_->setStyleSheet("color: #88ccff; font-size: 14px; font-weight: bold;");
+        // 2026-10-19 fix-theme: 不硬编码标题色 (跟随主题)
     }
     if (panel_lbl_status_) {
         panel_lbl_status_->setText("⏳ 等待启动");
-        panel_lbl_status_->setStyleSheet(
-            "background-color: #444; color: #fff; padding: 4px 14px; "
-            "border-radius: 4px; border: 1px solid #888; font-weight: bold;");
+        // 2026-10-19 fix-theme: 用 level=info 让 QSS 接管灰色背景
+        panel_lbl_status_->setProperty("level", "info");
+        panel_lbl_status_->style()->unpolish(panel_lbl_status_);
+        panel_lbl_status_->style()->polish(panel_lbl_status_);
     }
     if (panel_lbl_elapsed_) panel_lbl_elapsed_->setText("⏱ 00:00");
     panel_elapsed_timer_->start();
@@ -1772,9 +1766,10 @@ void AbMainWindow::panelResetUi(int total) {
     // 当前执行区
     if (panel_lbl_current_idx_) {
         panel_lbl_current_idx_->setText("—");
-        panel_lbl_current_idx_->setStyleSheet(
-            "background-color: #4682b4; color: #fff; padding: 2px 8px; "
-            "border-radius: 3px; font-weight: bold;");
+        // 2026-10-19 fix-theme: 用 level=info 让 QSS 接管蓝色背景
+        panel_lbl_current_idx_->setProperty("level", "info");
+        panel_lbl_current_idx_->style()->unpolish(panel_lbl_current_idx_);
+        panel_lbl_current_idx_->style()->polish(panel_lbl_current_idx_);
     }
     if (panel_lbl_current_dt_) panel_lbl_current_dt_->setText("⏱ 0s");
     if (panel_txt_current_cmd_) panel_txt_current_cmd_->clear();
@@ -1791,6 +1786,8 @@ void AbMainWindow::panelResetUi(int total) {
     if (panel_txt_detail_cmd_) panel_txt_detail_cmd_->clear();
     if (panel_btn_open_sub_log_) panel_btn_open_sub_log_->setEnabled(false);
     if (panel_btn_copy_sub_cmd_) panel_btn_copy_sub_cmd_->setEnabled(false);
+    // 2026-10-19: 新任务开始 → 详情面板恢复隐藏 (用户点击 sub-task 再显示)
+    if (panel_detail_box_) panel_detail_box_->setVisible(false);
 
     // 按钮可用性
     if (panel_btn_stop_) panel_btn_stop_->setEnabled(true);
@@ -1879,9 +1876,10 @@ void AbMainWindow::panelUpdateFinishedItem(int idx, int total, int rc, double dt
 
     // 当前执行区
     if (panel_lbl_current_idx_) {
-        panel_lbl_current_idx_->setStyleSheet(
-            "background-color: #44aa44; color: #fff; padding: 2px 8px; "
-            "border-radius: 3px; font-weight: bold;");
+        // 2026-10-19 fix-theme: 用 level=ok 让 QSS 接管绿色背景 (跑完)
+        panel_lbl_current_idx_->setProperty("level", "ok");
+        panel_lbl_current_idx_->style()->unpolish(panel_lbl_current_idx_);
+        panel_lbl_current_idx_->style()->polish(panel_lbl_current_idx_);
     }
     if (panel_lbl_current_dt_) {
         panel_lbl_current_dt_->setText(QString("⏱ %1s %2").arg(dt, 0, 'f', 1).arg(rc == 0 ? "✓" : "✗"));
@@ -1907,16 +1905,18 @@ void AbMainWindow::onSubStartedPanel(const QString& task_name, int idx, int tota
     }
     if (panel_lbl_current_idx_) {
         panel_lbl_current_idx_->setText(QString("[%1/%2]").arg(idx).arg(total));
-        panel_lbl_current_idx_->setStyleSheet(
-            "background-color: #ff8800; color: #fff; padding: 2px 8px; "
-            "border-radius: 3px; font-weight: bold;");
+        // 2026-10-19 fix-theme: 用 level=warn 让 QSS 接管橙色背景 (running)
+        panel_lbl_current_idx_->setProperty("level", "warn");
+        panel_lbl_current_idx_->style()->unpolish(panel_lbl_current_idx_);
+        panel_lbl_current_idx_->style()->polish(panel_lbl_current_idx_);
     }
     // 顶部 status badge
     if (panel_lbl_status_) {
         panel_lbl_status_->setText(QString("⏳ Running (%1/%2)").arg(idx).arg(total));
-        panel_lbl_status_->setStyleSheet(
-            "background-color: #4488aa; color: #fff; padding: 4px 14px; "
-            "border-radius: 4px; border: 1px solid #888; font-weight: bold;");
+        // 2026-10-19 fix-theme: 用 level=info 让 QSS 接管蓝色背景 (running)
+        panel_lbl_status_->setProperty("level", "info");
+        panel_lbl_status_->style()->unpolish(panel_lbl_status_);
+        panel_lbl_status_->style()->polish(panel_lbl_status_);
     }
     panel_selected_sub_idx_ = idx;
     onPanelTaskListClicked();
@@ -1933,9 +1933,10 @@ void AbMainWindow::onSubFailedPanel(const QString& task_name, int idx, int total
     if (task_name != current_task_) return;
     if (panel_lbl_status_) {
         panel_lbl_status_->setText(QString("✗ Failed at %1/%2").arg(idx).arg(total));
-        panel_lbl_status_->setStyleSheet(
-            "background-color: #aa4444; color: #fff; padding: 4px 14px; "
-            "border-radius: 4px; border: 1px solid #888; font-weight: bold;");
+        // 2026-10-19 fix-theme: 用 level=err 让 QSS 接管红色背景 (failed)
+        panel_lbl_status_->setProperty("level", "err");
+        panel_lbl_status_->style()->unpolish(panel_lbl_status_);
+        panel_lbl_status_->style()->polish(panel_lbl_status_);
     }
     // 失败时清掉编译进度 (避免残留)
     if (panel_lbl_compile_progress_) {
@@ -1997,6 +1998,8 @@ void AbMainWindow::onPanelTaskListClicked() {
     if (panel_txt_detail_cmd_) panel_txt_detail_cmd_->setPlainText(full);
     if (panel_btn_open_sub_log_) panel_btn_open_sub_log_->setEnabled(true);
     if (panel_btn_copy_sub_cmd_) panel_btn_copy_sub_cmd_->setEnabled(true);
+    // 2026-10-19: 点击 sub-task → 显示详情面板 (如果之前被关闭)
+    if (panel_detail_box_) panel_detail_box_->setVisible(true);
 }
 
 void AbMainWindow::onPanelUpdateElapsed() {

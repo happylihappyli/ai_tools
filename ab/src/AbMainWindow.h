@@ -184,6 +184,7 @@ private:
     QLabel*      panel_lbl_detail_meta_ = nullptr;
     QPushButton* panel_btn_open_sub_log_ = nullptr;
     QPushButton* panel_btn_copy_sub_cmd_ = nullptr;
+    QPushButton* panel_btn_close_detail_ = nullptr;  // 2026-10-19: 关闭按钮 (默认隐藏)
     QPlainTextEdit* panel_txt_detail_cmd_ = nullptr;
     // 顶部工具栏 (2026-09-16 v7: 5 个按钮合并到这里, 不再占底部空间)
     QToolBar*    panel_toolbar_      = nullptr;

@@ -37,6 +37,11 @@ QStatusBar QLabel[level="ok"]   { background: #1e3a1e; color: #6a9955; font-weig
 QStatusBar QLabel[level="err"]  { background: #3a1e1e; color: #f48771; font-weight: bold; }
 QStatusBar QLabel[level="warn"] { background: #3a2e1e; color: #dcdcaa; font-weight: bold; }
 QStatusBar QLabel[level="info"] { background: #1e2a3a; color: #569cd6; font-weight: bold; }
+/* 2026-10-19 fix-theme: 让 status badge 等通用 QLabel 也能用 level 属性 */
+QLabel[level="ok"]   { background: #1e3a1e; color: #6a9955; font-weight: bold; padding: 4px 14px; border-radius: 4px; border: 1px solid #888; }
+QLabel[level="err"]  { background: #3a1e1e; color: #f48771; font-weight: bold; padding: 4px 14px; border-radius: 4px; border: 1px solid #888; }
+QLabel[level="warn"] { background: #3a2e1e; color: #dcdcaa; font-weight: bold; padding: 2px 8px;  border-radius: 3px; }
+QLabel[level="info"] { background: #1e2a3a; color: #569cd6; font-weight: bold; padding: 4px 14px; border-radius: 4px; border: 1px solid #888; }
 QPushButton { background: #252526; color: #d4d4d4; border: 1px solid #3c3c3c; padding: 6px 14px; border-radius: 4px; min-height: 18px; }
 QPushButton:hover  { background: #569cd6; color: white; border-color: #569cd6; }
 QPushButton:pressed { background: #4ec9b0; }
@@ -87,6 +92,11 @@ QStatusBar QLabel[level="ok"]   { background: #e8f5e9; color: #2e7d32; font-weig
 QStatusBar QLabel[level="err"]  { background: #ffebee; color: #c62828; font-weight: bold; }
 QStatusBar QLabel[level="warn"] { background: #fff3e0; color: #ef6c00; font-weight: bold; }
 QStatusBar QLabel[level="info"] { background: #e3f2fd; color: #1565c0; font-weight: bold; }
+/* 2026-10-19 fix-theme: 让 status badge 等通用 QLabel 也能用 level 属性 */
+QLabel[level="ok"]   { background: #e8f5e9; color: #2e7d32; font-weight: bold; padding: 4px 14px; border-radius: 4px; border: 1px solid #888; }
+QLabel[level="err"]  { background: #ffebee; color: #c62828; font-weight: bold; padding: 4px 14px; border-radius: 4px; border: 1px solid #888; }
+QLabel[level="warn"] { background: #fff3e0; color: #ef6c00; font-weight: bold; padding: 2px 8px;  border-radius: 3px; }
+QLabel[level="info"] { background: #e3f2fd; color: #1565c0; font-weight: bold; padding: 4px 14px; border-radius: 4px; border: 1px solid #888; }
 QPushButton { background: #f5f5f5; color: #212121; border: 1px solid #e0e0e0; padding: 6px 14px; border-radius: 4px; min-height: 18px; }
 QPushButton:hover  { background: #1565c0; color: white; border-color: #1565c0; }
 QPushButton:pressed { background: #1976d2; }
@@ -137,6 +147,11 @@ QStatusBar QLabel[level="ok"]   { background: #073642; color: #859900; font-weig
 QStatusBar QLabel[level="err"]  { background: #073642; color: #dc322f; font-weight: bold; }
 QStatusBar QLabel[level="warn"] { background: #073642; color: #b58900; font-weight: bold; }
 QStatusBar QLabel[level="info"] { background: #073642; color: #268bd2; font-weight: bold; }
+/* 2026-10-19 fix-theme: 让 status badge 等通用 QLabel 也能用 level 属性 */
+QLabel[level="ok"]   { background: #073642; color: #859900; font-weight: bold; padding: 4px 14px; border-radius: 4px; border: 1px solid #586e75; }
+QLabel[level="err"]  { background: #073642; color: #dc322f; font-weight: bold; padding: 4px 14px; border-radius: 4px; border: 1px solid #586e75; }
+QLabel[level="warn"] { background: #073642; color: #b58900; font-weight: bold; padding: 2px 8px;  border-radius: 3px; }
+QLabel[level="info"] { background: #073642; color: #268bd2; font-weight: bold; padding: 4px 14px; border-radius: 4px; border: 1px solid #586e75; }
 QPushButton { background: #073642; color: #93a1a1; border: 1px solid #586e75; padding: 6px 14px; border-radius: 4px; min-height: 18px; }
 QPushButton:hover  { background: #b58900; color: #002b36; border-color: #b58900; }
 QPushButton:pressed { background: #cb4b16; color: #002b36; }
@@ -187,6 +202,11 @@ QStatusBar QLabel[level="ok"]   { background: #3b4252; color: #a3be8c; font-weig
 QStatusBar QLabel[level="err"]  { background: #3b4252; color: #bf616a; font-weight: bold; }
 QStatusBar QLabel[level="warn"] { background: #3b4252; color: #ebcb8b; font-weight: bold; }
 QStatusBar QLabel[level="info"] { background: #3b4252; color: #88c0d0; font-weight: bold; }
+/* 2026-10-19 fix-theme: 让 status badge 等通用 QLabel 也能用 level 属性 */
+QLabel[level="ok"]   { background: #3b4252; color: #a3be8c; font-weight: bold; padding: 4px 14px; border-radius: 4px; border: 1px solid #4c566a; }
+QLabel[level="err"]  { background: #3b4252; color: #bf616a; font-weight: bold; padding: 4px 14px; border-radius: 4px; border: 1px solid #4c566a; }
+QLabel[level="warn"] { background: #3b4252; color: #ebcb8b; font-weight: bold; padding: 2px 8px;  border-radius: 3px; }
+QLabel[level="info"] { background: #3b4252; color: #88c0d0; font-weight: bold; padding: 4px 14px; border-radius: 4px; border: 1px solid #4c566a; }
 QPushButton { background: #3b4252; color: #d8dee9; border: 1px solid #4c566a; padding: 6px 14px; border-radius: 4px; min-height: 18px; }
 QPushButton:hover  { background: #88c0d0; color: #2e3440; border-color: #88c0d0; }
 QPushButton:pressed { background: #81a1c1; color: #2e3440; }

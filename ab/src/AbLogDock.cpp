@@ -214,10 +214,17 @@ void AbLogDock::onCopyCmdClicked() {
     if (status_lbl_) status_lbl_->setText("复制命令功能见 build_poc_a_stage3_gui.py (POC-A Stage 3 链)");
 }
 
-// 2026-10-15: 解析 ANSI 颜色码 + 剥 ESC 序列, 染到 QPlainTextEdit
+// 2026-10-15 / 2026-10-19: 解析 ANSI 颜色码 + 剥 ESC 序列, 染到 QPlainTextEdit
 //   scons / 编译工具会用 ESC[xxm 染色, QPlainTextEdit 默认不解析, 之前直接显示为 "[34m..."
 //   拆 ESC[...m 段, SGR 参数翻 QColor, 用 QTextCursor 插入带 QTextCharFormat 的文本
 //   符号标记 (▶▶▶ / ✓ / ✗ / 🚀 / ===) 走强制颜色
+//
+//   v2 (2026-10-19):
+//     - 改成手动扫 ESC (不用 QRegularExpression, 避免 PCRE 在 0x1B 边界上的边角问题)
+//     - 改进 SGR 颜色映射: 接收 "1;34" 这种多参数; ESC[0m 和 ESC[m 视作重置
+//     - 不识别的 ESC 序列一律剥掉, log 区不再残留 [xxm 之类
+//     - 修 fast path bug: symbolColorHex 非空时, 即使只有一段也走 cursor 路径
+//       (否则带符号的行不会上色)
 void appendColoredLine(QPlainTextEdit* view, const QString& line) {
     if (!view) return;
 
@@ -228,47 +235,81 @@ void appendColoredLine(QPlainTextEdit* view, const QString& line) {
     else if (line.startsWith("✗")) symbolColorHex = "#ff8888";
     else if (line.startsWith("🚀") || line.contains("===")) symbolColorHex = "#ffaa44";
 
-    // 拆 ESC[...m 段
-    // 形态: \x1B\[ 参数(;参数)* m   (允许空参数; m 必现)
-    static const QRegularExpression esc_re(
-        "\x1B\\[([\\d;]*)m", QRegularExpression::DotMatchesEverythingOption);
-
     struct Seg { QString colorHex; QString text; };
     QList<Seg> segs;
     QString curText;
-    int last = 0;
     QString currentColorHex = symbolColorHex;
 
-    auto it = esc_re.globalMatch(line);
-    while (it.hasNext()) {
-        auto m = it.next();
-        int s = m.capturedStart();
-        int e = m.capturedEnd();
-        curText += line.mid(last, s - last);
-        if (!curText.isEmpty()) {
-            segs.append({currentColorHex, curText});
-            curText.clear();
+    // 手动扫描 ESC 序列. ESC = 0x1B, 序列以字母结尾 (m/K/H/J 等). 我们只处理 SGR 'm'.
+    // 其它 CSI 序列 (e.g. "[2J") 也整体剥掉, 避免残留.
+    const QChar ESC = QChar(0x1B);
+    int n_len = line.size();
+    int i = 0;
+    while (i < n_len) {
+        QChar c = line.at(i);
+        if (c == ESC && i + 1 < n_len && line.at(i + 1) == QChar('[')) {
+            // CSI 序列: ESC [ <params> <final>
+            int params_start = i + 2;
+            int final_idx = params_start;
+            while (final_idx < n_len) {
+                QChar fc = line.at(final_idx);
+                // final byte: 0x40-0x7E (ASCII @ .. ~)
+                if (fc.unicode() >= 0x40 && fc.unicode() <= 0x7e) break;
+                final_idx++;
+            }
+            if (final_idx >= n_len) {
+                // 序列未结束 (行被截断), 把剩下的当纯文本追加
+                curText += line.mid(i);
+                i = n_len;
+                break;
+            }
+            QChar final_byte = line.at(final_idx);
+            QString params_str = line.mid(params_start, final_idx - params_start);
+
+            if (final_byte == QChar('m')) {
+                // SGR: 解析参数, 改 currentColorHex
+                QStringList ps;
+                if (params_str.isEmpty()) {
+                    ps << "0";
+                } else {
+                    ps = params_str.split(';', Qt::SkipEmptyParts);
+                    if (ps.isEmpty()) ps << "0";
+                }
+                QString new_color = sgrToColor(ps);
+                if (!new_color.isEmpty()) {
+                    currentColorHex = new_color;
+                } else if (ps.contains("0") || params_str.isEmpty()) {
+                    // 重置
+                    currentColorHex = symbolColorHex;
+                }
+                // 其它 SGR (粗体/下划线等) — 忽略, 不影响颜色
+            }
+            // 其它 CSI 序列 (清屏/光标移动) — 不处理, 直接跳过
+
+            // 提交已有 curText
+            if (!curText.isEmpty()) {
+                segs.append({currentColorHex, curText});
+                curText.clear();
+            }
+            i = final_idx + 1;
+            continue;
         }
-        QString params = m.captured(1);
-        QStringList ps = params.split(';', Qt::SkipEmptyParts);
-        if (ps.isEmpty()) ps << "0";
-        QString c = sgrToColor(ps);
-        if (!c.isEmpty()) currentColorHex = c;
-        else if (params == "0" || params.isEmpty()) currentColorHex = symbolColorHex;
-        last = e;
+        curText += c;
+        i++;
     }
-    curText += line.mid(last);
     if (!curText.isEmpty()) {
         segs.append({currentColorHex, curText});
     }
 
     // 没任何段 (空行) — 走 plain
     if (segs.isEmpty()) {
-        view->appendPlainText(line);
+        view->appendPlainText(line + "\n");
         return;
     }
 
-    // 全段同色 + 无符号色强制 -> fast path
+    // fast path: 只有一段且颜色与 symbolColorHex 相同, 而且没有 ANSI 颜色覆盖
+    // (即没有遇到 ESC[xxm — 那时 sgrToColor 会改 currentColorHex)
+    // 仅有 1 段 + symbolColorHex 空时 (普通行) 用 appendPlainText
     if (segs.size() == 1 && segs[0].colorHex == symbolColorHex && symbolColorHex.isEmpty()) {
         view->appendPlainText(segs[0].text + "\n");
         return;
