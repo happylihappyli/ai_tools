@@ -532,13 +532,23 @@ void AbMainWindow::buildCentralPanel() {
     // 注: panel_current_box_ 加入 QTabWidget (panel_task_tab_) 在下方, 不直接 addWidget 到 root
 
     // ====== 中间 split: 左 sub-task 列表 + 右 实时 log ======
-    // 2026-10-19 fix-splitter-ratio: 用户要求"宽度可以占2/3, 左边占1/3" → 左:右 = 1:2
+    // 2026-10-19 fix-splitter-ratio: 用户要求"左边占1/4, 右边实时日志3/4" → 左:右 = 1:3
+    // 问题: setSizes({1, 3}) 用相对权重是官方推荐做法, 但实际效果:
+    //   - 构造时 splitter handle 还没拿到父 layout 给的尺寸, setSizes 第一次会被忽略
+    //   - setStretchFactor 是 "权重" 而不是 "比例", 受 sizeHint 影响大
+    //   - 子 widget 有自己的 sizeHint, QListWidget 偏好较宽, QPlainTextEdit 偏好较宽, 平衡时两边差不多
+    // 修复: 在 resizeEvent 里**强制** setSizes({W/4, 3W/4}) 重新分配, 加 QTimer::singleShot(0) 在事件循环首轮补一次
     panel_splitter_ = new QSplitter(Qt::Orientation::Horizontal);
-    panel_splitter_->setStretchFactor(0, 1);  // 左
-    panel_splitter_->setStretchFactor(1, 2);  // 右 (2/3)
-    panel_splitter_->setSizes({400, 800});     // 1:2 初始比例
+    panel_splitter_->setChildrenCollapsible(false);
+    // 给左/右子 widget 设置不同的 sizeHint, 让 splitter 倾向右更大
+    panel_splitter_->setHandleWidth(4);
+    panel_splitter_->setStretchFactor(0, 1);   // 左 (1/4)
+    panel_splitter_->setStretchFactor(1, 3);   // 右 (3/4)
 
     QWidget* left = new QWidget();
+    left->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+    // 关键: 给左 widget 偏小的最小宽度, 防止 QListWidget 默认 sizeHint 偏大抢空间
+    left->setMinimumWidth(120);
     QVBoxLayout* ll = new QVBoxLayout(left);
     ll->setContentsMargins(0, 0, 0, 0);
     QLabel* lbl_left_title = new QLabel("📋 Sub-task 进度");
@@ -558,6 +568,9 @@ void AbMainWindow::buildCentralPanel() {
     panel_splitter_->addWidget(left);
 
     QWidget* right = new QWidget();
+    right->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    // 关键: 给右 widget 设置较强 Expanding + minimum, 让 splitter 倾向让它占大头
+    right->setMinimumWidth(300);
     QVBoxLayout* rl = new QVBoxLayout(right);
     rl->setContentsMargins(0, 0, 0, 0);
     QHBoxLayout* log_header = new QHBoxLayout();
@@ -571,8 +584,17 @@ void AbMainWindow::buildCentralPanel() {
     // 2026-10-19 fix-theme: 不要硬编码深色背景, 让主题 QSS 接管
     //   之前 #0a0a0a 黑色背景 + #cccccc 浅灰字, light 主题切过来 log 区也是黑底黑字反差乱
     panel_log_view_->setMaximumBlockCount(10000);
+    // 让 log 区域可以无限缩放 (splitter 给它更多空间)
+    panel_log_view_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     rl->addWidget(panel_log_view_);
     panel_splitter_->addWidget(right);
+
+    // 延迟到事件循环首次布局后再设比例 — setSizes 在 widget 还没确定尺寸时不生效
+    QTimer::singleShot(0, this, [this]() {
+        if (panel_splitter_) {
+            panel_splitter_->setSizes({1, 3});
+        }
+    });
 
     root->addWidget(panel_splitter_, /*stretch=*/1);
 
@@ -654,6 +676,20 @@ void AbMainWindow::buildCentralPanel() {
     // setStyleSheet(...暗主题...) 已删除
 
     // 2026-09-16 v3: log dock 已移除, no-op (log 在中央面板)
+}
+
+// 2026-10-19: 窗口缩放后强制保持 1:3 splitter 比例 (左 1/4, 右 3/4)
+//  Qt QSplitter 的 setSizes 在 splitter 构造后第一次布局前不生效 (widget 还没拿到父 layout 分配的尺寸)
+//  resizeEvent 在窗口每次变化时被触发, 我们重新按比例分配像素值
+//  这保证: 1) 启动后第一次显示就是 1:3  2) 拉大/缩小窗口保持 1:3
+void AbMainWindow::resizeEvent(QResizeEvent* e) {
+    QMainWindow::resizeEvent(e);
+    if (!panel_splitter_) return;
+    int total_w = panel_splitter_->width();
+    if (total_w <= 0) return;
+    int left_w  = total_w / 4;       // 1/4
+    int right_w = total_w - left_w;  // 3/4
+    panel_splitter_->setSizes({left_w, right_w});
 }
 
 void AbMainWindow::buildStatusBar() {

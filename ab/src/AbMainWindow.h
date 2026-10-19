@@ -63,6 +63,10 @@ public:
 
     void reloadConfig();
 
+protected:
+    // 2026-10-19: 窗口缩放后强制保持 1:2 splitter 比例 (setSizes 在初次布局前不生效)
+    void resizeEvent(QResizeEvent* e) override;
+
 public slots:
     void onOutput(const QString& task_name, const QString& line);
     void onFinished(const QString& task_name, int exit_code, double elapsed);
