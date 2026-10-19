@@ -63,17 +63,31 @@ ab GUI 左边 [📋 任务] tab 看每个 task 的状态 (⏸/🟡/✓/✗), [�
 
 3 个 sub-cmd 串行跑, 左边 [🔧 sub-task] tab 显示成 3 行 (running/ok/err 状态). 失败立即停.
 
-## 启动提示窗口 (startup_prompt)
-ab 启动后, 读取 `ai_build.json` 的 `ui.prompt` 字段, **弹大字体模态窗口**显示提示 (默认 28pt). 用户点 OK 后再进 auto_start 跑 task chain. 没有 `ui.prompt` 时不弹.
+## 启动提示 (startup_prompt)
+用户原话: "默认不要显示大字体窗口, 或在这个窗口放到主窗口, 顶部工具栏附近, 哪里空放哪里".
+  "默认不要显示, 除非提醒用户要操作". "如果是自动的, 一般也不用提示, 每个子任务都有说明".
+
+ab 启动后默认行为 (modal=false):
+- **不弹模态窗口** — 把 `ai_build.json` 的 `ui.prompt` 字段挂到 **顶部 header 🔔 按钮** (QToolButton).
+- 按钮默认隐藏, 有 prompt 才显示. 显示 `🔔 (N)` N 段.
+- 鼠标 hover 菜单项看 tooltip 第一行, 点击弹 QMessageBox 看完整内容.
+- 没 prompt 时按钮完全隐藏, 不打扰用户.
+
+要弹**强制模态大字体**窗口 (用户原话 "提醒用户要操作" 的场景):
+- `ui.prompt_modal: true` — 启动后弹串行 QMessageBox, 28pt 加粗, 一路 OK 看完才进 auto_start.
+- 适合: 危险操作警告, 强制提醒, 一次性 GUI 引导.
 
 `ui.prompt` 格式支持:
 - 单字符串 (按 \n 拆段)
-- list[str]: 每段一个 dialog
+- list[str]: 每段一个 menu item (modal 模式: 每段一个 dialog)
 - list[dict]: `{"title": "...", "body": "..."}` — title + body 组合
 
-`ui.prompt_font_pt`: 大字体 pt (默认 28).
+`ui.prompt_font_pt`: 大字体 pt (默认 28, **仅 modal 模式** 用).
+`ui.prompt_modal`: 默认 false. true 弹强制模态.
 
-**典型用法**: 编译说明 (auto 链 3 步), 操作提示 (双击任务行跑子任务), X11 提示 (缺 X11 session 时 editor 不会显示). 等等.
+**典型用法**:
+- 编译说明, 操作提示 — 加 `ui.prompt` (默认非模态, 用户点 🔔 看).
+- 危险操作警告, 强制提醒 — 加 `ui.prompt_modal: true` (弹大字体, 强制看).
 
 ## 关键优势
 - 实时滚动 stdout/stderr (不缓冲)
