@@ -18,6 +18,7 @@
 #include <QTreeWidget>
 #include <QHeaderView>
 #include <QLabel>
+#include <QToolButton>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QStatusBar>
@@ -135,8 +136,8 @@ AbMainWindow::AbMainWindow(const AbConfig& cfg, const QString& configPath, QWidg
     log("info", "💡 任务列表: 顶部 [任务检查器] → [📋 任务] tab, 双击行直接跑");
     log("info", "💡 操作日志: 底部面板, 编译/任务输出实时滚出 (Ctrl+Shift+L 切换)");
 
-    // 2026-10-19 startup-prompt: 启动后先弹大字体模态提示 (用户在 ai_build.json 里配的).
-    //   必须在 auto_start 跑之前 — 让用户先点 OK 看完提示, 再开始编译.
+    // 2026-10-19 startup-prompt: 默认不弹 — 把 prompt 挂到顶部 header 🔔 按钮 (用户点开看).
+    //   ai_build.json 设 ui.prompt_modal=true 才弹模态 (强制用户看完).
     showStartupPrompts();
 
     // auto_start
@@ -241,36 +242,73 @@ void AbMainWindow::buildFromConfig() {
     });
 }
 
-// 2026-10-19 startup-prompt-window (用户反馈需要): 启动后弹大字体模态窗口
-//   显示 ai_build.json 的 ui.prompt 字段. 每段一个 QMessageBox, 大字体 (默认 28pt),
-//   用户点 OK 跳下一段 (或关闭). 没有 prompt 时不弹.
+// 2026-10-19 startup-prompt (用户反馈):
+//   默认不弹窗 — 把 prompt 挂到顶部 header 🔔 按钮 (用户点开看).
+//   ai_build.json 设 ui.prompt_modal=true 才弹模态 (强制用户看完).
+//   "如果是自动的, 一般也不用提示, 每个子任务都有说明" — auto 链跑起来后
+//   🔧 sub-task tab 实时显示, 不需要默认 prompt 弹窗.
 void AbMainWindow::showStartupPrompts() {
     if (cfg_.startup_prompts.isEmpty()) {
+        if (panel_btn_prompts_) panel_btn_prompts_->setVisible(false);
         return;
     }
     int font_pt = cfg_.startup_prompt_font_pt > 0 ? cfg_.startup_prompt_font_pt : 28;
-    for (int i = 0; i < cfg_.startup_prompts.size(); ++i) {
-        const QString& text = cfg_.startup_prompts[i];
-        QString title = QString("⚡ %1 (%3/%4)")
-            .arg(i + 1 == 1 ? "启动提示" : "启动提示")
-            .arg(i + 1)
-            .arg(cfg_.startup_prompts.size());
-        QMessageBox box(this);
-        box.setWindowTitle(title);
-        box.setText(text);
-        box.setIcon(QMessageBox::Information);
-        // 大字体: QMessageBox 默认 QLabel 是 message 字段, 改 font.
-        QFont f = box.font();
-        f.setPointSize(font_pt);
-        f.setBold(true);
-        box.setFont(f);
-        // 留出足够空间给大字体
-        box.setMinimumSize(600, 200);
-        box.adjustSize();
-        box.exec();
+    // 2026-10-19 startup-prompt (用户原话: '默认不要显示大字体窗口, 除非提醒用户要操作'):
+    //   默认 modal=false — 不弹模态, 把 prompt 加到顶部 header 🔔 按钮的 menu (用户点开才看).
+    //   modal=true 才弹模态 QMessageBox (大字体).
+    //   用户提示: '如果是自动的, 一般也不用提示, 每个子任务都有说明' — 用户的 auto 链跑
+    //   起来后, 🔧 sub-task tab 已经实时显示, 不需要默认 prompt 弹窗.
+    if (cfg_.startup_prompts.isEmpty()) {
+        if (panel_btn_prompts_) panel_btn_prompts_->setVisible(false);
+        return;
     }
-    log("ok", QString("[startup-prompt] 显示 %1 段大字体提示 (用户已点 OK)")
-        .arg(cfg_.startup_prompts.size()));
+    if (cfg_.startup_prompt_modal) {
+        // 强制模态: 弹大字体 QMessageBox 串行, 用户必须 OK 一路点完
+        for (int i = 0; i < cfg_.startup_prompts.size(); ++i) {
+            const QString& text = cfg_.startup_prompts[i];
+            QString title = QString("⚡ 启动提示 (%1/%2)")
+                .arg(i + 1).arg(cfg_.startup_prompts.size());
+            QMessageBox box(this);
+            box.setWindowTitle(title);
+            box.setText(text);
+            box.setIcon(QMessageBox::Information);
+            QFont f = box.font();
+            f.setPointSize(font_pt);
+            f.setBold(true);
+            box.setFont(f);
+            box.setMinimumSize(600, 200);
+            box.adjustSize();
+            box.exec();
+        }
+        log("ok", QString("[startup-prompt modal] 显示 %1 段大字体提示 (用户已点 OK)")
+            .arg(cfg_.startup_prompts.size()));
+        // modal 完后按钮隐藏 (用户已读完)
+        if (panel_btn_prompts_) panel_btn_prompts_->setVisible(false);
+    } else {
+        // 默认非模态: 把每段 prompt 加到顶部 🔔 按钮的 menu (用户点开才看)
+        //   按钮显示 🔔 + (N) 提示有几段 prompt
+        if (!panel_btn_prompts_) return;
+        QMenu* m = panel_btn_prompts_->menu();
+        m->clear();
+        for (int i = 0; i < cfg_.startup_prompts.size(); ++i) {
+            const QString& text = cfg_.startup_prompts[i];
+            // 用第一行作为菜单项标题 + 后面行作为 tooltip (完整 prompt)
+            QStringList lines = text.split('\n');
+            QString title = lines.isEmpty() ? text : lines.first().left(60);
+            QString rest  = lines.size() > 1 ? lines.mid(1).join('\n') : QString();
+            QAction* a = m->addAction(QString("%1. %2").arg(i + 1).arg(title));
+            a->setToolTip(rest.isEmpty() ? text : rest);
+            // 不弹窗 — 鼠标 hover 上看 tooltip; 想看完整用菜单项或 QMessageBox
+            connect(a, &QAction::triggered, this, [this, text, title]() {
+                QMessageBox::information(this, title, text);
+            });
+        }
+        panel_btn_prompts_->setText(QString("🔔 (%1)").arg(cfg_.startup_prompts.size()));
+        panel_btn_prompts_->setToolTip(QString("启动提示 %1 段, 点开看").arg(cfg_.startup_prompts.size()));
+        panel_btn_prompts_->setVisible(true);
+        log("info", QString("[startup-prompt] %1 段提示已挂到 🔔 按钮 (默认非模态, 点开看)")
+            .arg(cfg_.startup_prompts.size()));
+    }
 }
 
 // 2026-09-02: 框架内置通用菜单 (所有调试程序都需要)
@@ -514,6 +552,17 @@ void AbMainWindow::buildCentralPanel() {
     // status badge 用 dynamicProperty [level] 让主题 QSS 接管 (ok/err/warn/info 已在 QSS)
     panel_lbl_status_->setProperty("level", "info");
     hl->addWidget(panel_lbl_status_);
+
+    // 2026-10-19 startup-prompt-button: 默认不弹模态窗口, 而是在主窗口顶部 header
+    //   加一个 🔔 提示按钮 (用户原话: '默认不要显示, 顶部工具栏附近, 哪里空放哪里').
+    //   用户点按钮展开 prompt list (非模态). 要强制模态, ai_build.json 设 ui.prompt_modal=true.
+    panel_btn_prompts_ = new QToolButton();
+    panel_btn_prompts_->setText("🔔");
+    panel_btn_prompts_->setToolTip("启动提示 (点开看)");
+    panel_btn_prompts_->setVisible(false);  // 默认隐藏, 有 prompt 才显示
+    panel_btn_prompts_->setPopupMode(QToolButton::ToolButtonPopupMode::InstantPopup);
+    panel_btn_prompts_->setMenu(new QMenu(panel_btn_prompts_));  // 占位, 后填
+    hl->addWidget(panel_btn_prompts_);
 
     // 2026-10-15: 编译进度 label (scons 编译 N 个文件)
     //   显示 "🔨 编译 12 个 (foo.cpp)" — 200ms 节流, 不抢 status badge

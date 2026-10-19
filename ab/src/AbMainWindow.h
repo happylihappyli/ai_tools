@@ -37,6 +37,7 @@ class QTreeWidgetItem;
 class QLabel;
 class QProgressBar;
 class QPushButton;
+class QToolButton;
 class QStatusBar;
 class QAction;
 class QMenu;
@@ -172,6 +173,8 @@ private:
     QLabel*      panel_lbl_status_    = nullptr;
     // 2026-10-15: 编译进度 (scons "Compiling xxx" 实时累计)
     QLabel*      panel_lbl_compile_progress_ = nullptr;
+    // 2026-10-19 startup-prompt-button: 顶部 header 提示按钮 (默认隐藏, 有 prompt 时显示, 点开看)
+    QToolButton*  panel_btn_prompts_  = nullptr;
     // 进度条
     QProgressBar*panel_progress_      = nullptr;
     // 当前执行区

@@ -105,6 +105,7 @@ AbConfig AbConfig::load(const QString& path) {
             cfg.startup_prompts = s.split('\n', Qt::SkipEmptyParts);
         }
         cfg.startup_prompt_font_pt = ui["prompt_font_pt"].toInt(cfg.startup_prompt_font_pt);
+        cfg.startup_prompt_modal = ui["prompt_modal"].toBool(cfg.startup_prompt_modal);
 
         // window
         QJsonObject win = ui["window"].toObject();

@@ -96,11 +96,15 @@ struct AbConfig {
     bool    show_log_dock = true;
     bool    disable_built_in_toolbar = false;  // 2026-09-18 加 — true 时 buildToolbar 只显 ui.toolbar 自定义按钮, 不加 F5/F6/F7/run_after_build 等默认按钮
     bool    auto_exit = false;  // 2026-10-09 加 — auto 链全部完成后自动退出 (适合 AI/脚本调用)
-    // 2026-10-19 加 — 启动时弹一个大字体模态提示窗口 (用户要求). 字符串 / list 都行.
-    //   例如: "编译完成后会自动启动 fork engine editor. 启动需 X11 GUI."
-    //   或 list: [{"title": "...", "body": "..."}, ...]
+    // 2026-10-19 startup-prompt: 启动提示语。用户要求"默认不要显示大字体窗口,
+    //   除非提醒用户要操作"。默认不弹, 顶部 header 加 🔔 按钮 (隐式).
+    //   点按钮看 prompt. ai_build.json 设 ui.prompt_modal=true 才弹模态.
+    //   字符串 / list 都行 (list 每项可以是 string 或 {"title":..., "body":...}).
+    //   例: ["编译完会自动启动 fork engine editor. 启动需 X11 GUI."]
+    //   例: [{"title": "🎯 编译说明", "body": "ab 会跑 build/strip/launch-editor 3 步"}]
     QStringList startup_prompts;
-    int     startup_prompt_font_pt = 28;  // 大字体 pt (默认 28)
+    bool    startup_prompt_modal = false;    // 2026-10-19 加 — 默认 false (顶部 header 按钮); true 弹模态
+    int     startup_prompt_font_pt = 28;     // 大字体 pt (默认 28, 仅 modal=true 用)
 
     std::vector<AbMenuDef> menus;
     std::vector<AbButtonDef> toolbar;
