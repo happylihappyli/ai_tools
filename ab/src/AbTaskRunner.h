@@ -63,13 +63,16 @@ signals:
     void sub_finished(const QString& task_name, int idx, int total,
                       int rc, double dt_sec);
     void sub_failed(const QString& task_name, int idx, int total);
-    // 2026-10-15: 单 sub-task 内"编译 N 个文件"的实时进度
+    // 2026-10-15: 单 sub-task 内"编译 N 个文件"实时进度
     //   task_name/idx/total: 当前 sub-task 位置
     //   compile_count: 这次 sub-task 已扫到的"编译动作"次数 (scons "Compiling foo.cpp" / gcc -c / clang -c 等)
     //   last_file: 最近一次匹配到的文件名 (短名, 没匹配就是空)
     //   每 200ms 节流一次 (避免日志洪水)
     void sub_progress(const QString& task_name, int idx, int total,
                       int compile_count, const QString& last_file);
+    // 2026-10-19 ab-error-log: task 失败 (rc != 0) 时 emit, 路径给上层显示在 UI
+    //   + agent 可以从 stdout / 文件直接读这个路径 grep.
+    void error_log_written(const QString& task_name, const QString& log_path, int exit_code);
 
 private slots:
     void onReadyRead();
@@ -99,6 +102,12 @@ private:
     QString       cur_last_file_;          // 最近一次匹配到的文件名
     QTimer        progress_timer_;         // 200ms 节流 emit sub_progress
     void          bumpCompileProgress(const QString& line);  // 喂一行, 内部 regex 匹配
+      // 2026-10-19 ab-error-log: 失败时把最近 N 行输出写到 /tmp/ab-error-<task>-<ts>.log,
+      //   让 agent (或人) grep / read 看完整 stdout/stderr 上下文. ring buffer 装最近 200 行.
+      static constexpr int kErrorRingMaxLines = 200;
+      QStringList   error_ring_;  // 最近 kErrorRingMaxLines 行 (循环覆盖)
+      void          pushErrorRing(const QString& line);
+      QString       dumpErrorRingToFile(int exit_code);
 };
 
 }  // namespace ab

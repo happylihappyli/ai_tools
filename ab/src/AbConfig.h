@@ -96,6 +96,11 @@ struct AbConfig {
     bool    show_log_dock = true;
     bool    disable_built_in_toolbar = false;  // 2026-09-18 加 — true 时 buildToolbar 只显 ui.toolbar 自定义按钮, 不加 F5/F6/F7/run_after_build 等默认按钮
     bool    auto_exit = false;  // 2026-10-09 加 — auto 链全部完成后自动退出 (适合 AI/脚本调用)
+    // 2026-10-19 user-configurable-auto-exit-wait: 用户原话 "有错误，没有错误，等待几秒，用户可以设置，保存，默认都是3秒"
+    //   让用户在 GUI 设 wait 秒数, QSettings 持久化. 默认 3 秒 (成功失败都等 3 秒).
+    //   显示倒计时 QTimer (每秒 -1) 让用户能 cancel auto-exit.
+    int     auto_exit_wait_sec = 3;          // 默认等 3 秒. 范围 [0, 60], 0 = 立即退.
+    QString auto_exit_last_task;             // (QSettings 持久化用) 最近一次 auto-exit 失败 task_name
     // 2026-10-19 startup-prompt: 启动提示语。用户要求"默认不要显示大字体窗口,
     //   除非提醒用户要操作"。默认不弹, 顶部 header 加 🔔 按钮 (隐式).
     //   点按钮看 prompt. ai_build.json 设 ui.prompt_modal=true 才弹模态.

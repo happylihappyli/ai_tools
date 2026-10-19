@@ -6,6 +6,9 @@
 #include <QDir>
 #include <QRegularExpression>
 #include <cstdio>
+#include <cstring>   // 2026-10-19: strerror
+#include <cerrno>    // 2026-10-19: errno
+#include <ctime>     // 2026-10-19: localtime_r / strftime
 #include <unistd.h>  // 2026-10-15: isatty / STDERR_FILENO
 
 namespace ab {
@@ -57,6 +60,7 @@ void AbTaskRunner::run(const QString& task_name, const QString& cmd,
     task_name_  = task_name;
     last_single_cmd_ = cmd;  // 2026-09-18 加 — onProcError 时能报 cmd (跟 sub_cmds_ 对称)
     pending_.clear();
+    error_ring_.clear();  // 2026-10-19 ab-error-log: 新 task 开始, 清空 ring (上次的输出别混入)
     sub_total_  = 0;   // 标记为单 task 模式 (区别于 sub-task 模式)
     sub_idx_    = 0;
     sub_cmds_.clear();
@@ -93,6 +97,7 @@ void AbTaskRunner::runSubTasks(const QString& task_name,
     sub_total_   = sub_cmds.size();
     sub_idx_     = 0;  // 下一个要跑的 idx (0-indexed)
     pending_.clear();
+    error_ring_.clear();  // 2026-10-19 ab-error-log: 新 sub-task list 开始, 清空 ring
     QProcess* p = ensureProc();
     p->setWorkingDirectory(working_dir);
     p->setProcessChannelMode(QProcess::SeparateChannels);
@@ -188,6 +193,8 @@ void AbTaskRunner::onReadyRead() {
         QString line = pending_.left(idx);
         pending_.remove(0, idx + 1);
         if (line.endsWith('\r')) line.chop(1);
+        // 2026-10-19 ab-error-log: 失败时 dump 最近 N 行给 agent, 这里 push 到 ring
+        pushErrorRing(line);
         emit output(task_name_, line);
         // 2026-10-15: 喂给"编译 N 个文件"检测器, 200ms 节流 emit
         bumpCompileProgress(line);
@@ -277,6 +284,15 @@ void AbTaskRunner::onProcFinished(int exit_code, QProcess::ExitStatus /*status*/
 
         if (exit_code != 0) {
             // 失败: emit sub_failed, 然后 emit 整 task finished (rc = exit_code)
+            // 2026-10-19 ab-error-log: 失败时 dump 最近 200 行 ring buffer 到 /tmp/ab-error-<task>-<ts>.log
+            //   + emit error_log_written signal (AbMainWindow 接到显示在 UI + agent 可读)
+            QString err_log_path = dumpErrorRingToFile(exit_code);
+            if (!err_log_path.isEmpty()) {
+                emit output(task_name_, QString("⚠ [sub %1/%2] rc=%3, 最近 %4 行输出写到 %5")
+                    .arg(idx1).arg(sub_total_).arg(exit_code)
+                    .arg(error_ring_.size()).arg(err_log_path));
+                emit error_log_written(task_name_, err_log_path, exit_code);
+            }
             emit sub_failed(task_name_, idx1, sub_total_);
             sub_total_ = 0;
             sub_cmds_.clear();
@@ -295,6 +311,15 @@ void AbTaskRunner::onProcFinished(int exit_code, QProcess::ExitStatus /*status*/
     // 单 task 模式 (老 API)
     auto end_t = std::chrono::steady_clock::now();
     double elapsed = std::chrono::duration<double>(end_t - start_t_).count();
+    // 2026-10-19 ab-error-log: 单 task 失败也 dump (跟 sub-task 模式一致)
+    if (exit_code != 0) {
+        QString err_log_path = dumpErrorRingToFile(exit_code);
+        if (!err_log_path.isEmpty()) {
+            emit output(task_name_, QString("⚠ [task] rc=%1, 最近 %2 行输出写到 %3")
+                .arg(exit_code).arg(error_ring_.size()).arg(err_log_path));
+            emit error_log_written(task_name_, err_log_path, exit_code);
+        }
+    }
     emit finished(task_name_, exit_code, elapsed);
 }
 
@@ -352,6 +377,75 @@ void AbTaskRunner::onProcError(QProcess::ProcessError err) {
         sub_cmds_.clear();
         sub_descs_.clear();
     }
+}
+
+// 2026-10-19 ab-error-log: ring buffer 加行 (固定 kErrorRingMaxLines 大小,
+//   满了从头覆盖, 失败时 dump 出去). 包括 stdout + stderr 全部行.
+void AbTaskRunner::pushErrorRing(const QString& line) {
+    error_ring_.append(line);
+    if (error_ring_.size() > kErrorRingMaxLines) {
+        error_ring_.removeFirst();  // 循环覆盖最旧的行
+    }
+}
+
+// 2026-10-19 ab-error-log: 失败时 dump ring 到 /tmp/ab-error-<task>-<ts>.log
+//   文件包含:
+//     - 头: task_name / exit_code / sub_idx (if sub-task mode) / 时间戳 / 工作目录
+//     - 体: error_ring_ 里最近 kErrorRingMaxLines 行 (旧→新)
+//   返回写入的文件路径 (失败时返回空).
+QString AbTaskRunner::dumpErrorRingToFile(int exit_code) {
+    if (error_ring_.isEmpty()) {
+        // 没收集到任何输出 (e.g. cmd 没跑起来) — 仍然写文件, 至少有 header 上下文
+    }
+    // 用时间戳保证唯一, agent 可以 grep /tmp/ab-error-*.log 看所有历史失败
+    auto now_t = std::chrono::system_clock::now();
+    auto now_tt = std::chrono::system_clock::to_time_t(now_t);
+    struct tm tm_buf;
+    localtime_r(&now_tt, &tm_buf);
+    char ts_buf[32];
+    strftime(ts_buf, sizeof(ts_buf), "%Y%m%d_%H%M%S", &tm_buf);
+
+    // task_name 替换非法字符 (/) 保证合法文件名
+    QString safe_task = task_name_;
+    safe_task.replace(QRegularExpression("[^A-Za-z0-9_.-]"), "_");
+    QString path = QString("/tmp/ab-error-%1-%2.log").arg(safe_task).arg(ts_buf);
+
+    FILE* fp = fopen(path.toUtf8().constData(), "w");
+    if (!fp) {
+        fprintf(stderr, "[AbTaskRunner] dumpErrorRingToFile: fopen(%s) failed: %s\n",
+            path.toUtf8().constData(), std::strerror(errno));
+        fflush(stderr);
+        return QString();
+    }
+    // 头: 元信息 (agent grep task / exit_code 快速定位)
+    fprintf(fp, "# ab error dump\n");
+    fprintf(fp, "task_name=%s\n", task_name_.toUtf8().constData());
+    fprintf(fp, "exit_code=%d\n", exit_code);
+    fprintf(fp, "sub_mode=%s\n", sub_total_ > 0 ? "yes" : "no");
+    if (sub_total_ > 0) {
+        fprintf(fp, "sub_failed_idx=%d\n", sub_idx_ + 1);
+        fprintf(fp, "sub_total=%d\n", sub_total_);
+        if (sub_idx_ < sub_cmds_.size()) {
+            fprintf(fp, "failed_cmd=%s\n", sub_cmds_[sub_idx_].toUtf8().constData());
+        }
+        if (sub_idx_ < sub_descs_.size()) {
+            fprintf(fp, "failed_desc=%s\n", sub_descs_[sub_idx_].toUtf8().constData());
+        }
+    } else {
+        fprintf(fp, "single_cmd=%s\n", last_single_cmd_.toUtf8().constData());
+    }
+    fprintf(fp, "working_dir=%s\n", working_dir_.toUtf8().constData());
+    fprintf(fp, "ring_lines=%d (last %d max)\n", (int)error_ring_.size(), kErrorRingMaxLines);
+    fprintf(fp, "# ---- ring buffer (oldest -> newest, last %d lines) ----\n", (int)error_ring_.size());
+    // 写所有 ring 行 (append 顺序就是旧→新, 已经按时间顺序)
+    for (const QString& line : error_ring_) {
+        QByteArray utf8 = line.toUtf8();
+        fwrite(utf8.constData(), 1, utf8.size(), fp);
+        fputc('\n', fp);
+    }
+    fflush(fp);
+    fclose(fp);
+    return path;
 }
 
 }  // namespace ab

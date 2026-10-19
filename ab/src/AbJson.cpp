@@ -6,6 +6,11 @@
 #include <fstream>
 #include <sstream>
 #include <cctype>
+#include <QFile>          // 2026-10-19: patchUiAutoExitWait
+#include <QJsonDocument>  // 2026-10-19: 同上
+#include <QJsonObject>    // 2026-10-19: 同上
+#include <QJsonParseError>// 2026-10-19: 同上
+#include <QIODevice>      // 2026-10-19: 同上
 
 namespace ab {
 
@@ -181,6 +186,28 @@ AbJson AbJson::parseFile(const std::string& path) {
     std::stringstream ss;
     ss << f.rdbuf();
     return parse(ss.str());
+}
+
+// 2026-10-19 user-configurable-auto-exit-wait: 把 ui.auto_exit_wait_sec 写回 ai_build.json.
+//   用 QJsonDocument 解析/序列化 (Qt 原生, AbJson 是简化 parser 不支持 write).
+//   失败 silent (file 没权限 / 格式坏 / 顶层没 ui 段 — 都不 crash, 用户下一次 reload
+//   还是用 QSettings 里的 user-pref).
+void AbJson::patchUiAutoExitWait(const std::string& json_path, int sec) {
+    QFile f(json_path.c_str());
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return;
+    QByteArray bytes = f.readAll();
+    f.close();
+    QJsonParseError err;
+    QJsonDocument doc = QJsonDocument::fromJson(bytes, &err);
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) return;
+    QJsonObject root = doc.object();
+    QJsonObject ui = root.value("ui").toObject();
+    ui["auto_exit_wait_sec"] = sec;
+    root["ui"] = ui;
+    doc.setObject(root);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) return;
+    f.write(doc.toJson(QJsonDocument::Indented));
+    f.close();
 }
 
 }  // namespace ab

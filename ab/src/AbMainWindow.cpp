@@ -7,7 +7,11 @@
 #include "InspectorWindow.h"  // 2026-09-16 v4: 独立 InspectorWindow (包 AbTaskInspector)
 #include "TaskRunnerWindow.h" // 2026-09-16: 独立任务运行器窗口 (仿 ac_task_runner_gui.py)
 
+#include <cstdio>   // 2026-10-19: fopen / fprintf for auto-exit-marker
 #include <map>
+#include <QSpinBox>     // 2026-10-19: auto-exit 倒计时秒数配置
+#include <QSettings>    // 2026-10-19: 持久化 auto_exit_wait_sec (跨项目)
+#include <algorithm>   // 2026-10-19: std::clamp
 #include <QVBoxLayout>
 #include <QGuiApplication>
 #include <QScreen>
@@ -62,6 +66,13 @@ AbMainWindow::AbMainWindow(const AbConfig& cfg, const QString& configPath, QWidg
       // 2026-09-19: ai_build.json 路径 — 用于 reload + QFileSystemWatcher
       //   默认: cfg_.cwd + "/ai_build.json" (跟 main.cpp:1426 找 configPath 路径一致)
       config_path_(configPath.isEmpty() ? (cfg_.cwd + "/ai_build.json") : configPath) {
+    // 2026-10-19 user-configurable-auto-exit-wait: QSettings 持久化的 user-pref 覆盖 cfg.
+    //   用户原话 "用户可以设置, 保存". 顺序: ai_build.json → QSettings user-pref (最后覆盖).
+    {
+        QSettings s("ai_tools", "ab");
+        int sec = s.value("auto_exit_wait_sec", -1).toInt();
+        if (sec >= 0) cfg_.auto_exit_wait_sec = std::clamp(sec, 0, 60);
+    }
     updateWindowTitle();   // 2026-09-09: 初始窗口标题 = cfg_.title
     // 2026-09-16 v5: 启动时窗口宽度 = 屏幕宽度的 80%, 高度用 cfg (默认 700)
     //   跨屏幕分辨率自动适配 (1080p / 1440p / 4K 都能 80% 填满)
@@ -194,6 +205,15 @@ void AbMainWindow::wireRunner() {
             this, &AbMainWindow::onSubFinishedPanel);
     connect(runner_, &AbTaskRunner::sub_failed,
             this, &AbMainWindow::onSubFailedPanel);
+    // 2026-10-19 ab-error-log: 失败时 ab-error-*.log 写到 /tmp, 给 agent 看. 显示路径
+    //   在 log panel + stderr (sandbox 里 agent tail /tmp/cloud_editor.log 也能看到).
+    connect(runner_, &AbTaskRunner::error_log_written,
+            this, [this](const QString& task_name, const QString& log_path, int exit_code) {
+                log("error", QString("[%1] rc=%2 错误日志: %3").arg(task_name).arg(exit_code).arg(log_path));
+                fprintf(stderr, "[ab-error-log] task=%s rc=%d file=%s\n",
+                    task_name.toUtf8().constData(), exit_code, log_path.toUtf8().constData());
+                fflush(stderr);
+            });
     // 2026-10-15: 单 sub-task 内编译文件数实时进度 (scons / gcc / ninja)
     connect(runner_, &AbTaskRunner::sub_progress,
             this, &AbMainWindow::onSubProgress);
@@ -563,6 +583,42 @@ void AbMainWindow::buildCentralPanel() {
     panel_btn_prompts_->setPopupMode(QToolButton::ToolButtonPopupMode::InstantPopup);
     panel_btn_prompts_->setMenu(new QMenu(panel_btn_prompts_));  // 占位, 后填
     hl->addWidget(panel_btn_prompts_);
+
+    // 2026-10-19 auto-exit-countdown-gui: 倒计时 cancel 按钮 + wait sec spinbox.
+    //   用户原话 "用户可以设置, 保存, 默认都是3秒, 而且有倒计时". 这里给 GUI 配置:
+    //     [auto-exit 倒计时] [___3___秒] [✕ 取消退出 (3s)]
+    //   spinbox 改 cfg_.auto_exit_wait_sec (QSettings 持久化); cancel 按钮设 cancel_auto_exit_=true
+    //   timer 检查到就停 quit, 不退.
+    QLabel* lbl_wait = new QLabel("auto-exit 倒计时:");
+    lbl_wait->setFont(QFont("sans", 9));
+    hl->addWidget(lbl_wait);
+    auto_exit_wait_spin_ = new QSpinBox();
+    auto_exit_wait_spin_->setRange(0, 60);
+    auto_exit_wait_spin_->setSuffix("秒");
+    auto_exit_wait_spin_->setValue(cfg_.auto_exit_wait_sec);
+    auto_exit_wait_spin_->setToolTip("auto 链跑完后等几秒自动退出. 0 = 立即退. 范围 [0, 60]");
+    hl->addWidget(auto_exit_wait_spin_);
+    auto_exit_cancel_btn_ = new QPushButton("✕ 取消退出");
+    auto_exit_cancel_btn_->setToolTip("auto-exit 倒计时中点这个取消退出 (GUI 留着)");
+    auto_exit_cancel_btn_->setVisible(false);
+    hl->addWidget(auto_exit_cancel_btn_);
+    connect(auto_exit_wait_spin_, QOverload<int>::of(&QSpinBox::valueChanged),
+            this, [this](int v) {
+                cfg_.auto_exit_wait_sec = std::clamp(v, 0, 60);
+                // 写回 ai_build.json (顶层 ui.auto_exit_wait_sec), 这样下次 reload 还在.
+                if (!config_path_.isEmpty()) {
+                    AbJson::patchUiAutoExitWait(config_path_.toStdString(), cfg_.auto_exit_wait_sec);
+                }
+                // QSettings 也存一份 (用户跨项目用)
+                QSettings s("ai_tools", "ab");
+                s.setValue("auto_exit_wait_sec", cfg_.auto_exit_wait_sec);
+                log("info", QString("auto-exit 等待时间设 %1 秒 (写回 ai_build.json)").arg(cfg_.auto_exit_wait_sec));
+            });
+    connect(auto_exit_cancel_btn_, &QPushButton::clicked,
+            this, [this]() {
+                cancel_auto_exit_ = true;
+                log("info", "✕ 用户点了取消退出 (next timer tick 不再 quit)");
+            });
 
     // 2026-10-15: 编译进度 label (scons 编译 N 个文件)
     //   显示 "🔨 编译 12 个 (foo.cpp)" — 200ms 节流, 不抢 status badge
@@ -1070,15 +1126,77 @@ void AbMainWindow::onRunAuto() {
 
 void AbMainWindow::runNextInAuto() {
     if (auto_index_ >= auto_queue_.size()) {
-        // 2026-10-09 add-auto-exit: 链中断检测 — 之前某 task 失败 (rc != 0) 时不要退出,
-        //   让用户看到错误. 只有全部成功才退出.
+        // 2026-10-19 auto-exit-always: 之前只有 all_ok 才退, 用户报告 '有错误没自动退出'.
+        //   改: --auto-exit 时**无论成功失败都退出**, 用退出码区分 (0=全成功, 非0=有失败).
+        //   TTS 仍然播报成功/失败, GUI log 显示完整错误 (跟 ab-error-*.log 一起).
+        //   这样 agent (sandbox) 跑完能立刻拿到 $? 决定下一步, 不需要 wait-for-user.
         bool all_ok = (last_task_exit_code_ == 0);
-        log("ok", QString("auto 链全部完成 ✓ (退出码 %1) auto_exit=%2")
-            .arg(last_task_exit_code_).arg(cfg_.auto_exit ? "true" : "false"));
+        log(all_ok ? "ok" : "warn",
+            QString("auto 链结束 (all_ok=%1 last_rc=%2 auto_exit=%3)")
+            .arg(all_ok ? "true" : "false")
+            .arg(last_task_exit_code_)
+            .arg(cfg_.auto_exit ? "true" : "false"));
         speakTextAsync(all_ok ? "全部完成" : QString("失败 %1").arg(last_task_exit_code_));
-        if (cfg_.auto_exit && all_ok) {
-            // 100ms 延迟让 TTS "全部完成" 先播完, 退出码 = 0 (AI 拿 $? 判断成功).
-            QTimer::singleShot(100, qApp, []{ qApp->quit(); });
+        if (cfg_.auto_exit) {
+            // 2026-10-19 user-configurable-auto-exit-wait: 用户原话 "有错误，没有错误，等待几秒，
+            //   用户可以设置，保存，默认都是3秒, 而且有倒计时".
+            //   改: 用 cfg_.auto_exit_wait_sec (默认 3), 范围 [0, 60], 0 = 立即退.
+            //   显示倒计时 QTimer (每秒 -1) 让用户能 cancel auto-exit (点 "✕ 取消" 按钮).
+            int final_rc = all_ok ? 0 : (last_task_exit_code_ != 0 ? last_task_exit_code_ : 1);
+            int wait_sec = std::clamp(cfg_.auto_exit_wait_sec, 0, 60);
+            int wait_ms  = wait_sec * 1000;
+            // 2026-10-19 auto-exit-marker: 写退出码 marker 给 agent 看. 先写 (即使 ab crash 也拿到).
+            QString marker = QString("/tmp/ab-auto-exit-%1.rc").arg(QCoreApplication::applicationPid());
+            FILE* fp = fopen(marker.toUtf8().constData(), "w");
+            if (fp) {
+                fprintf(fp, "%d\n", final_rc);
+                fclose(fp);
+            }
+            fprintf(stderr, "[AbMainWindow] auto_exit marker: %s = %d (wait %ds)\n",
+                marker.toUtf8().constData(), final_rc, wait_sec);
+            fflush(stderr);
+
+            // 2026-10-19 countdown: 启动 QTimer 倒计时显示到 GUI + stderr. 用户能 cancel.
+            cancel_auto_exit_ = false;  // 用户点 ✕ 时设 true, timer 检查到就不 quit
+            if (auto_exit_countdown_timer_) delete auto_exit_countdown_timer_;
+            auto_exit_countdown_timer_ = new QTimer(this);
+            auto_exit_countdown_timer_->setInterval(1000);
+            int remaining = wait_sec;
+            QString countdown_msg = all_ok
+                ? QString("✓ auto 链成功, %1 秒后自动退出 (点 ✕ 取消)").arg(remaining)
+                : QString("⚠ auto 链失败 (rc=%1), %2 秒后自动退出 — 复制: cat /tmp/ab-error-*.log | grep task_name=<FAILED_TASK> (点 ✕ 取消)")
+                      .arg(final_rc).arg(remaining);
+            log(all_ok ? "ok" : "warn", countdown_msg);
+            if (auto_exit_cancel_btn_) {
+                auto_exit_cancel_btn_->setVisible(true);
+                auto_exit_cancel_btn_->setText(QString("✕ 取消退出 (%1s)").arg(remaining));
+            }
+            connect(auto_exit_countdown_timer_, &QTimer::timeout, this, [this, all_ok, final_rc, wait_ms]() {
+                if (cancel_auto_exit_) {
+                    log("info", "✕ 用户取消了 auto-exit");
+                    if (auto_exit_cancel_btn_) auto_exit_cancel_btn_->setVisible(false);
+                    if (auto_exit_countdown_timer_) { auto_exit_countdown_timer_->stop(); }
+                    return;
+                }
+                remaining_counter_--;
+                if (remaining_counter_ < 0) {
+                    if (auto_exit_countdown_timer_) auto_exit_countdown_timer_->stop();
+                    if (auto_exit_cancel_btn_) auto_exit_cancel_btn_->setVisible(false);
+                    qApp->quit();
+                    return;
+                }
+                if (auto_exit_cancel_btn_) {
+                    auto_exit_cancel_btn_->setText(QString("✕ 取消退出 (%1s)").arg(remaining_counter_));
+                }
+                log(all_ok ? "ok" : "warn",
+                    QString(all_ok
+                        ? "✓ 成功, %1 秒后退出 (点 ✕ 取消)"
+                        : "⚠ 失败 (rc=%1), %2 秒后退出 — 复制 cat /tmp/ab-error-*.log (点 ✕ 取消)")
+                        .arg(final_rc).arg(remaining_counter_));
+            });
+            auto_exit_countdown_timer_->start();
+            // 立即触发一次让剩余时间从 wait_sec 开始显示
+            remaining_counter_ = wait_sec;
         }
         return;
     }

@@ -38,6 +38,7 @@ class QLabel;
 class QProgressBar;
 class QPushButton;
 class QToolButton;
+class QSpinBox;  // 2026-10-19: auto-exit 倒计时秒数配置 spinbox
 class QStatusBar;
 class QAction;
 class QMenu;
@@ -212,6 +213,14 @@ private:
     QLabel*        sb_proj_    = nullptr;
     QLabel*        sb_right_   = nullptr;
     QLabel*        sb_render_  = nullptr;
+
+    // 2026-10-19 auto-exit-countdown: 倒计时 + cancel 按钮. cfg_.auto_exit_wait_sec 默认 3,
+    //   启动 QTimer 每秒 -1, 倒计时显示到 GUI + log. 用户点 ✕ 设 cancel_auto_exit_=true 跳过 quit.
+    QTimer*   auto_exit_countdown_timer_ = nullptr;
+    int       remaining_counter_ = 0;
+    bool      cancel_auto_exit_  = false;
+    QPushButton* auto_exit_cancel_btn_ = nullptr;
+    QSpinBox* auto_exit_wait_spin_ = nullptr;  // GUI 配置: 改 cfg_.auto_exit_wait_sec (写回 ai_build.json / QSettings)
 
     // 中央面板状态
     int     panel_total_sub_      = 0;

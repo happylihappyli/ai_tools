@@ -86,6 +86,11 @@ public:
     // 解析 (入口)
     static AbJson parse(const std::string& text);
     static AbJson parseFile(const std::string& path);
+    // 2026-10-19 user-configurable-auto-exit-wait: 把 ui.auto_exit_wait_sec 写回 ai_build.json
+    //   AbMainWindow 在用户改 spinbox 时调, 文件不存在 / 解析失败 / 写失败都 silently return
+    //   (gui 闪一下但不 crash). 用 QJsonDocument/QFile (Qt 原生, 已有 include).
+    //   用 std::string 避免把 QString 暴露到 AbJson.h 头 (AbJson.cpp 里 .c_str() 即可).
+    static void patchUiAutoExitWait(const std::string& json_path, int sec);
 
 private:
     static const AbJson& null_instance() {

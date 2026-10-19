@@ -83,6 +83,8 @@ AbConfig AbConfig::load(const QString& path) {
         cfg.show_log_dock = ui["show_log_dock"].toBool(cfg.show_log_dock);
         cfg.disable_built_in_toolbar = ui["disable_built_in_toolbar"].toBool(cfg.disable_built_in_toolbar);  // 2026-09-18
         cfg.auto_exit = ui["auto_exit"].toBool(cfg.auto_exit);  // 2026-10-09 加 — 配 ui.auto_exit=true 也能在没 --auto-exit 参数时自动退出
+        // 2026-10-19 user-configurable-auto-exit-wait: ui.auto_exit_wait_sec 可配 wait 秒数 (默认 3)
+        cfg.auto_exit_wait_sec = ui["auto_exit_wait_sec"].toInt(cfg.auto_exit_wait_sec);
 
         // 2026-10-19 加 startup_prompts — 启动时弹大字体模态窗口. 字符串或 list 都行.
         QJsonValue promptsVal = ui["prompt"];

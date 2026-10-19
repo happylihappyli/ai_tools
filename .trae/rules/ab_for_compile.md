@@ -111,3 +111,78 @@ ab 启动后默认行为 (modal=false):
 - ❌ 编译完后 agent 自己 cp binary + 启 godot (用户看不到 TTS, 不知道编译完成)
 - ❌ 期待 `ab --no-auto` 跑任务 — 它只加载, 必须手动触发 (用户要求: 尽量别用 --no-auto)
 - ❌ 用 `ab --auto-exit` 还要在 sandbox 里跑 godot (X11 会断, 必须让用户手动启)
+
+## ⚡ 用户最新规则 (2026-10-19): 所有长时间任务都用 ab
+
+**用户原话**: "编译尽量用 ab 这套工具, 写到规则里, 这样用户可以实时看到输出, 以及进度, 所有任务等"
+
+**适用范围**:
+- ✅ **编译任务** (scons / make / cmake / configure 等) — 用户实时看进度
+- ✅ **长跑测试** (run test suite / 长跑 benchmark)
+- ✅ **部署任务** (docker build / deploy 脚本)
+- ✅ **长跑监控** (启动后持续运行的服务, 用 `ab --task X` 保持 GUI 可见)
+- ✅ **任何预计超过 30s 的命令** — 都走 ab
+
+**操作模式**:
+- 一次性 + 看进度 + 完事退出 → `ab --auto-exit /path/to/project`
+- 一次性 + 看进度 + 完事继续保留 GUI → `ab /path/to/project`
+- 持续长跑 (常驻后台) → `ab --task <task_name> /path/to/project`
+
+**规则**:
+- 🚫 不要用 `RunCommand` 直接跑 `scons ...` 或 `make ...` (agent 看得到但用户看不到)
+- 🚫 不要 `nohup ... &` 后 `tail -f log` — 用户看不到完整进度, 不能 pause/kill
+- ✅ 改 ai_build.json 拆 tasks + cmd array 后用 ab — 用户实时看每个 sub-step 状态/进度/log
+- ✅ 完成后 ab GUI 自动 TTS (`spd-say`) 通知用户 — 用户知道什么时候编译完
+- ✅ 用户能从 GUI 点 [⏹] 中止任何 task (kill QProcess) — 不需要 agent 帮忙
+
+**示例**: 任何 scons 编译 → 把 scons 命令加到 `ai_build.json` 的 `tasks.build.cmd`, 然后:
+```bash
+ab --auto-exit /home/bv/code/BV_WorkSpace_Linux/BV_WorkSpace-main_v7
+```
+GUI 自动跑 `build → strip → launch-editor` 全链, 用户实时看每步进度 + log + 错误.
+
+## ⚠️ 错误自动 dump + auto-exit-always (2026-10-19 用户规则 #2 + #3)
+
+**用户原话 #2**: "ab编译的一些错误，要写到专门文件里，这样你就可以及时看到，是否要修改一下ab"
+**用户原话 #3**: "有错误，没有自动退出，是否是错误阻止了自动退出"
+
+### 错误 dump 机制 (AbTaskRunner.cpp)
+- 每个 task 启动时清空 ring buffer
+- 每次 onReadyRead 调 `pushErrorRing(line)` — ring 大小 **200 行** (满了从头覆盖, FIFO)
+- task 失败 (rc != 0) 时调 `dumpErrorRingToFile(exit_code)`:
+  - 写 `/tmp/ab-error-<task>-<YYYYMMDD_HHMMSS>.log`
+  - 头: `task_name=`, `exit_code=`, `sub_mode=yes/no`, `failed_cmd=`, `failed_desc=`, `working_dir=`, `ring_lines=N`
+  - 体: ring buffer 所有行 (旧→新)
+  - 路径 emit 给 AbMainWindow 显示在 UI + emit `error_log_written` signal
+  - 同时写 stderr `[ab-error-log] task=X rc=N file=/tmp/ab-error-X-...log` (sandbox agent 能 grep 到)
+- log panel 也显示: `[X] rc=N 错误日志: /tmp/ab-error-X-...log`
+
+### auto-exit-always 机制 (AbMainWindow.cpp)
+- 之前 `--auto-exit` 只有**全部 task rc=0**才退出. 用户报告错误时不退.
+- 改: `--auto-exit` **无论成功失败都退出**, 用退出码区分:
+  - 全部成功 → 退出码 0, **等 500ms** 让 TTS 播完
+  - 任一 task 失败 → 退出码 = `last_task_exit_code_` (非0), **等 3 秒** 让用户复制错误日志 (用户原话: "自动退出最好等3秒, 让用户看到错误, 可以复制")
+- 同时写 `/tmp/ab-auto-exit-<pid>.rc` 给 agent 看实际退出码 (Qt QApplication::quit() 透传不到 shell $?, 写 marker 是最稳的方式). 先写 marker, 即使 ab crash / kill -9 也能拿退出码.
+- TTS 仍然播报成功/失败: "全部完成" / "失败 N"
+- 链失败时**不再继续跑下一个** task (避免错误累积)
+- 失败时 GUI log panel 显示: `⚠ auto 链失败 (rc=N), 3秒后自动退出 — 用户可复制错误日志: cat /tmp/ab-error-*.log | grep task_name=<FAILED_TASK>`
+
+### Agent 怎么看错误
+```bash
+# 1. 直接读最新的错误 log
+ls -t /tmp/ab-error-*.log | head -1 | xargs cat
+
+# 2. grep 某个 task 的所有历史失败
+grep -l 'task_name=build' /tmp/ab-error-*.log | xargs cat
+
+# 3. ab 退出码 (成功 0 / 失败非0)
+cat /tmp/ab-auto-exit-*.rc
+
+# 4. ab GUI 本身: 失败 log panel 顶部会显示 ⚠ 行 + 路径
+```
+
+### 示例 (成功路径 vs 失败路径)
+
+**成功**: 链 `["build", "strip", "launch-editor"]` 全过 → `/tmp/ab-auto-exit-<pid>.rc` = 0 → TTS "全部完成"
+
+**失败**: build 失败 → `/tmp/ab-auto-exit-<pid>.rc` = 2 (scons rc) → TTS "失败 2" → 自动退, agent 看 marker 决定下一步
