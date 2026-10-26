@@ -239,6 +239,8 @@ static const TrEntry kTrTable[] = {
     {"⏹ Stopping task...", "⏹ 正在停止 task..."},
     {"Auto chain finished (all_ok=%1 last_rc=%2 auto_exit=%3)",
      "auto 链结束 (all_ok=%1 last_rc=%2 auto_exit=%3)"},
+    {"⚠ auto chain aborted: task %1 failed (rc=%2), skipped %3 remaining task(s)",
+     "⚠ auto 链中断: task %1 失败 (rc=%2), 跳过剩余 %3 个"},
     {"✓ auto chain succeeded, exiting in %1 s (click ✕ to cancel)",
      "✓ auto 链成功, %1 秒后自动退出 (点 ✕ 取消)"},
     {"⚠ auto chain failed (rc=%1), exiting in %2 s — copy: cat /tmp/ab-error-*.log (click ✕ to cancel)",

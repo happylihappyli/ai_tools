@@ -1219,6 +1219,17 @@ void AbMainWindow::onRunAuto() {
 }
 
 void AbMainWindow::runNextInAuto() {
+    // 2026-10-26 fix-chain-fail-stop: 上一个 task 失败 → 中断 auto 链 (跳过剩余).
+    //   之前无条件继续: build 编译失败 (rc=2) 后 strip/launch-editor 照跑 — 把旧 binary
+    //   又启动一遍, 最后一个 task rc=0 → ab 报 "全部完成", 用户以为编译成功
+    //   (排查 "隐藏标签栏第二次加载仍显示" 时发现的真凶).
+    if (last_task_exit_code_ != 0 && auto_index_ < auto_queue_.size()) {
+        const QString failed = (auto_index_ > 0 && auto_index_ - 1 < auto_queue_.size())
+                ? auto_queue_[auto_index_ - 1] : QString("?");
+        log("err", T("⚠ auto chain aborted: task %1 failed (rc=%2), skipped %3 remaining task(s)")
+                .arg(failed).arg(last_task_exit_code_).arg(auto_queue_.size() - auto_index_));
+        auto_index_ = auto_queue_.size(); // 跳到末尾 → 走下方收尾 (TTS 失败 + auto-exit)
+    }
     if (auto_index_ >= auto_queue_.size()) {
         // 2026-10-19 auto-exit-always: 之前只有 all_ok 才退, 用户报告 '有错误没自动退出'.
         //   改: --auto-exit 时**无论成功失败都退出**, 用退出码区分 (0=全成功, 非0=有失败).
