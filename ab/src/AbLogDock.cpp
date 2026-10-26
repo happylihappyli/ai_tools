@@ -1,5 +1,6 @@
 // AbLogDock.cpp
 #include "AbLogDock.h"
+#include "AbLang.h"   // 2026-10-26: UI 字符串走翻译表
 #include <QDateTime>
 #include <QFont>
 #include <QScrollBar>
@@ -11,6 +12,9 @@
 #include <QProcess>
 
 namespace ab {
+
+// 2026-10-26: UI 字符串统一走 AbLang::T
+static QString T(const char* s) { return AbLang::T(s); }
 
 namespace {
 // SGR 参数 -> #RRGGBB (前景色). 0/未识别 = 默认
@@ -53,7 +57,7 @@ QString sgrToColor(const QStringList& params) {
 
 }  // namespace
 
-AbLogDock::AbLogDock(QWidget* parent) : QDockWidget("操作日志", parent) {
+AbLogDock::AbLogDock(QWidget* parent) : QDockWidget(T("Operation Log"), parent) {
     QWidget* w = new QWidget(this);
     QVBoxLayout* layout = new QVBoxLayout(w);
     layout->setContentsMargins(4, 4, 4, 4);
@@ -61,25 +65,25 @@ AbLogDock::AbLogDock(QWidget* parent) : QDockWidget("操作日志", parent) {
 
     // ===== 顶部工具栏 =====
     QHBoxLayout* bar = new QHBoxLayout();
-    auto_chk_ = new QCheckBox("自动滚动: 开", this);
+    auto_chk_ = new QCheckBox(T("Auto Scroll: On"), this);
     auto_chk_->setChecked(true);
     connect(auto_chk_, &QCheckBox::toggled, this, &AbLogDock::onAutoScrollToggled);
     bar->addWidget(auto_chk_);
 
     // 2026-09-09: 复制错误 (跟 build_poc_a_stage3_gui.py 同样)
-    copy_err_btn_ = new QPushButton("📋 复制错误", this);
-    copy_err_btn_->setToolTip("复制过滤后的 error/warn/traceback 行 (识别 FATAL, undefined reference 等关键字, 加 [E]/[W] 前缀)");
+    copy_err_btn_ = new QPushButton(T("📋 Copy Errors"), this);
+    copy_err_btn_->setToolTip(T("Copy filtered error/warn/traceback lines (FATAL, undefined reference etc., with [E]/[W] prefix)"));
     connect(copy_err_btn_, &QPushButton::clicked, this, &AbLogDock::onCopyErrorsClicked);
     bar->addWidget(copy_err_btn_);
 
     // 2026-09-09: 复制全部
-    copy_all_btn_ = new QPushButton("📄 复制全部", this);
-    copy_all_btn_->setToolTip("复制全部 log 内容 (含时间戳)");
+    copy_all_btn_ = new QPushButton(T("📄 Copy All"), this);
+    copy_all_btn_->setToolTip(T("Copy all log content (with timestamps)"));
     connect(copy_all_btn_, &QPushButton::clicked, this, &AbLogDock::onCopyAllClicked);
     bar->addWidget(copy_all_btn_);
 
     bar->addStretch(1);
-    clear_btn_ = new QPushButton("清空", this);
+    clear_btn_ = new QPushButton(T("Clear"), this);
     connect(clear_btn_, &QPushButton::clicked, this, &AbLogDock::onClearClicked);
     bar->addWidget(clear_btn_);
     layout->addLayout(bar);
@@ -95,7 +99,7 @@ AbLogDock::AbLogDock(QWidget* parent) : QDockWidget("操作日志", parent) {
 
     // ===== 状态栏 (黄底) =====
     // 2026-09-09: 复制结果回显 (跟 build_poc_a_stage3_gui.py 同样的 #ffff88 黄底)
-    status_lbl_ = new QLabel("就绪", this);
+    status_lbl_ = new QLabel(T("Ready"), this);
     status_lbl_->setStyleSheet(
         "QLabel { background-color: #ffff88; color: #202020; padding: 2px 6px;"
         " border-radius: 2px; font-weight: bold; }");
@@ -134,11 +138,11 @@ void AbLogDock::log(const QString& level, const QString& msg) {
 
 void AbLogDock::clearLog() {
     edit_->clear();
-    if (status_lbl_) status_lbl_->setText("已清空");
+    if (status_lbl_) status_lbl_->setText(T("Cleared"));
 }
 
 void AbLogDock::onAutoScrollToggled(bool checked) {
-    auto_chk_->setText(QString("自动滚动: %1").arg(checked ? "开" : "关"));
+    auto_chk_->setText(checked ? T("Auto Scroll: On") : T("Auto Scroll: Off"));
 }
 
 void AbLogDock::onClearClicked() {

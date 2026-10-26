@@ -3,6 +3,7 @@
 #include "TaskRunnerWindow.h"
 #include "AbTaskRunner.h"
 #include "AbLogDock.h"   // 2026-10-15: appendColoredLine (ANSI 染色)
+#include "AbLang.h"      // 2026-10-26: UI 字符串走翻译表 + log 词汇翻译
 
 #include <QApplication>
 #include <QClipboard>
@@ -38,6 +39,9 @@
 
 namespace ab {
 
+// 2026-10-26: UI 字符串统一走 AbLang::T
+static QString T(const char* s) { return AbLang::T(s); }
+
 // 2026-09-16: cloud_main 启动路径 (按 .trae/rules/godot_vulkan.md 强制 vulkan+wayland)
 //   跟 ac_task_runner_gui.py 一致
 static const QString kCloudMainBin =
@@ -56,7 +60,7 @@ TaskRunnerWindow::TaskRunnerWindow(AbTaskRunner* runner,
       sub_cmds_(sub_cmds),
       sub_descs_(sub_descs) {
     setAttribute(Qt::WA_DeleteOnClose, false);  // 不自动删除, ab 主窗口管生命周期
-    setWindowTitle(QString("📊 任务运行器 — %1").arg(task_name));
+    setWindowTitle(T("📊 Task Runner — %1").arg(task_name));
     resize(1200, 800);
     buildUi();
     wireRunner();
@@ -86,7 +90,7 @@ void TaskRunnerWindow::switchTask(const QString& task_name,
     task_name_ = task_name;
     sub_cmds_  = sub_cmds;
     sub_descs_ = sub_descs;
-    setWindowTitle(QString("📊 任务运行器 — %1").arg(task_name));
+    setWindowTitle(T("📊 Task Runner — %1").arg(task_name));
     if (lbl_title_) lbl_title_->setText(task_name);
     resetUi(sub_cmds_.size());
 }
@@ -120,7 +124,7 @@ void TaskRunnerWindow::buildUi() {
     lbl_elapsed_->setStyleSheet("color: #aaa;");
     hl->addWidget(lbl_elapsed_);
 
-    lbl_status_ = new QLabel("⏳ 等待启动");
+    lbl_status_ = new QLabel(T("⏳ Waiting"));
     lbl_status_->setFont(QFont("sans-serif", 11, QFont::Weight::Bold));
     lbl_status_->setStyleSheet(
         "background-color: #444; color: #fff; padding: 4px 14px; "
@@ -134,7 +138,7 @@ void TaskRunnerWindow::buildUi() {
     progress_ = new QProgressBar();
     progress_->setRange(0, std::max(sub_cmds_.size(), 1));
     progress_->setValue(0);
-    progress_->setFormat("0 / " + QString::number(sub_cmds_.size()) + "  (sub-task)");
+    progress_->setFormat(T("0 / %1  (sub-task)").arg(sub_cmds_.size()));
     progress_->setFixedHeight(20);
     progress_->setStyleSheet(
         "QProgressBar { border: 1px solid #444; border-radius: 3px; "
@@ -154,7 +158,7 @@ void TaskRunnerWindow::buildUi() {
     cb_layout->setContentsMargins(8, 4, 8, 4);
     cb_layout->setSpacing(2);
     QHBoxLayout* cur_top = new QHBoxLayout();
-    lbl_current_title_ = new QLabel("⚡ 当前执行");
+    lbl_current_title_ = new QLabel(T("⚡ Current"));
     lbl_current_title_->setFont(QFont("sans-serif", 11, QFont::Weight::Bold));
     lbl_current_title_->setStyleSheet("color: #88ccff;");
     cur_top->addWidget(lbl_current_title_);
@@ -180,7 +184,7 @@ void TaskRunnerWindow::buildUi() {
         "QPlainTextEdit { background-color: #0a1828; color: #ffeeaa; "
         "border: 1px solid #2a4a6a; padding: 4px; }"
     );
-    txt_current_cmd_->setPlaceholderText("(等待 sub-task 开始)");
+    txt_current_cmd_->setPlaceholderText(T("(waiting for sub-task to start)"));
     cb_layout->addWidget(txt_current_cmd_);
     root->addWidget(current_box_);
 
@@ -192,7 +196,7 @@ void TaskRunnerWindow::buildUi() {
     QWidget* left = new QWidget();
     QVBoxLayout* ll = new QVBoxLayout(left);
     ll->setContentsMargins(0, 0, 0, 0);
-    QLabel* lbl_sub_list_title = new QLabel("📋 Sub-task 进度");
+    QLabel* lbl_sub_list_title = new QLabel(T("📋 Sub-task Progress"));
     lbl_sub_list_title->setStyleSheet("color: #88ccff; font-weight: bold;");
     ll->addWidget(lbl_sub_list_title);
     sub_list_ = new QListWidget();
@@ -214,7 +218,7 @@ void TaskRunnerWindow::buildUi() {
     QVBoxLayout* rl = new QVBoxLayout(right);
     rl->setContentsMargins(0, 0, 0, 0);
     QHBoxLayout* log_header = new QHBoxLayout();
-    lbl_log_summary_ = new QLabel("📄 实时 log (stdout, 0 行)");
+    lbl_log_summary_ = new QLabel(T("📄 Live Log (%1 lines)").arg(0));
     lbl_log_summary_->setStyleSheet("color: #88ccff; font-weight: bold;");
     log_header->addWidget(lbl_log_summary_);
     log_header->addStretch();
@@ -233,21 +237,21 @@ void TaskRunnerWindow::buildUi() {
     root->addWidget(splitter_, /*stretch=*/1);
 
     // ============== 底部 详情区 ==============
-    detail_box_ = new QGroupBox("📜 选中 sub-task 详情");
+    detail_box_ = new QGroupBox(T("📜 Sub-task Details"));
     QVBoxLayout* dl = new QVBoxLayout(detail_box_);
     dl->setContentsMargins(6, 4, 6, 4);
     dl->setSpacing(2);
     QHBoxLayout* dt = new QHBoxLayout();
-    lbl_detail_meta_ = new QLabel("(未选中 sub-task)");
+    lbl_detail_meta_ = new QLabel(T("(no sub-task selected)"));
     lbl_detail_meta_->setFont(QFont("monospace", 10, QFont::Weight::Bold));
     lbl_detail_meta_->setStyleSheet("color: #88ccff;");
     dt->addWidget(lbl_detail_meta_);
     dt->addStretch();
-    btn_open_sub_log_ = new QPushButton("📂 打开 sub-task log");
+    btn_open_sub_log_ = new QPushButton(T("📂 Open sub-task log"));
     btn_open_sub_log_->setEnabled(false);
     connect(btn_open_sub_log_, &QPushButton::clicked, this, &TaskRunnerWindow::onOpenSubLog);
     dt->addWidget(btn_open_sub_log_);
-    btn_copy_sub_cmd_ = new QPushButton("📋 复制完整命令");
+    btn_copy_sub_cmd_ = new QPushButton(T("📋 Copy Full Command"));
     btn_copy_sub_cmd_->setEnabled(false);
     connect(btn_copy_sub_cmd_, &QPushButton::clicked, this, &TaskRunnerWindow::onCopySubCmd);
     dt->addWidget(btn_copy_sub_cmd_);
@@ -258,7 +262,7 @@ void TaskRunnerWindow::buildUi() {
     txt_detail_cmd_->setMinimumHeight(80);
     txt_detail_cmd_->setMaximumHeight(280);
     txt_detail_cmd_->setLineWrapMode(QPlainTextEdit::LineWrapMode::WidgetWidth);
-    txt_detail_cmd_->setPlaceholderText("(点击左侧 sub-task 行, 显示完整命令)");
+    txt_detail_cmd_->setPlaceholderText(T("(click a sub-task row on the left to see the full command)"));
     txt_detail_cmd_->setStyleSheet(
         "QPlainTextEdit { background-color: #0a0a0a; color: #aaffaa; "
         "border: 1px solid #333; padding: 4px; }"
@@ -269,7 +273,7 @@ void TaskRunnerWindow::buildUi() {
 
     // ============== 底部按钮行 ==============
     QHBoxLayout* btn_row = new QHBoxLayout();
-    btn_stop_ = new QPushButton("⏹ Stop (杀 task)");
+    btn_stop_ = new QPushButton(T("⏹ Stop (kill task)"));
     btn_stop_->setStyleSheet(
         "QPushButton { background-color: #aa4444; color: #fff; padding: 6px 14px; "
         "font-weight: bold; border-radius: 3px; }"
@@ -278,16 +282,16 @@ void TaskRunnerWindow::buildUi() {
     connect(btn_stop_, &QPushButton::clicked, this, &TaskRunnerWindow::onStopClicked);
     btn_row->addWidget(btn_stop_);
 
-    btn_copy_log_ = new QPushButton("📋 复制 log");
+    btn_copy_log_ = new QPushButton(T("📋 Copy Log"));
     connect(btn_copy_log_, &QPushButton::clicked, this, &TaskRunnerWindow::onCopyLog);
     btn_row->addWidget(btn_copy_log_);
 
-    btn_open_dir_ = new QPushButton("📂 打开 log 目录");
+    btn_open_dir_ = new QPushButton(T("📂 Open Log Directory"));
     connect(btn_open_dir_, &QPushButton::clicked, this, &TaskRunnerWindow::onOpenLogDir);
     btn_row->addWidget(btn_open_dir_);
 
     // 2026-09-16: 启动 cloud_main 按钮 (跟 ac_task_runner_gui.py 一致)
-    btn_launch_cloud_ = new QPushButton("🚀 启动 cloud_main");
+    btn_launch_cloud_ = new QPushButton(T("🚀 Launch cloud_main"));
     btn_launch_cloud_->setStyleSheet(
         "QPushButton { background-color: #2d7d2d; color: #fff; padding: 6px 14px; "
         "font-weight: bold; border-radius: 3px; }"
@@ -295,9 +299,7 @@ void TaskRunnerWindow::buildUi() {
         "QPushButton:disabled { background-color: #444; color: #888; }"
     );
     btn_launch_cloud_->setToolTip(
-        "启动 bin/Debug/cloud_main (Vulkan + Wayland)\n"
-        "适用于: ac task 跑完后看 3D 区域 + FPS Overlay"
-    );
+        T("Launch bin/Debug/cloud_main (Vulkan + Wayland)\nFor: after ac task, view 3D area + FPS Overlay"));
     connect(btn_launch_cloud_, &QPushButton::clicked, this, &TaskRunnerWindow::onLaunchCloudMain);
     btn_row->addWidget(btn_launch_cloud_);
     btn_row->addStretch();
@@ -308,7 +310,7 @@ void TaskRunnerWindow::buildUi() {
 
     // 状态栏
     QStatusBar* sb = statusBar();
-    sb->showMessage("就绪", 2000);
+    sb->showMessage(T("Ready"), 2000);
 
     // 暗主题 (仿 ac_task_runner_gui.py)
     setStyleSheet(
@@ -325,23 +327,23 @@ void TaskRunnerWindow::buildUi() {
 
     // 菜单
     QMenuBar* mb = menuBar();
-    QMenu* mrun = mb->addMenu("运行");
-    QAction* a_stop = new QAction("⏹ Stop", this);
+    QMenu* mrun = mb->addMenu(T("Run"));
+    QAction* a_stop = new QAction(T("⏹ Stop"), this);
     a_stop->setShortcut(QKeySequence("Ctrl+X"));
     connect(a_stop, &QAction::triggered, this, &TaskRunnerWindow::onStopClicked);
     mrun->addAction(a_stop);
     mrun->addSeparator();
-    QAction* a_close = new QAction("关闭", this);
+    QAction* a_close = new QAction(T("Close"), this);
     a_close->setShortcut(QKeySequence("Ctrl+Q"));
     connect(a_close, &QAction::triggered, this, &QMainWindow::close);
     mrun->addAction(a_close);
 
-    QMenu* mlog = mb->addMenu("Log");
-    QAction* a_copy = new QAction("📋 复制 log", this);
+    QMenu* mlog = mb->addMenu(T("Log (&L)"));
+    QAction* a_copy = new QAction(T("📋 Copy Log"), this);
     a_copy->setShortcut(QKeySequence("Ctrl+L"));
     connect(a_copy, &QAction::triggered, this, &TaskRunnerWindow::onCopyLog);
     mlog->addAction(a_copy);
-    QAction* a_open = new QAction("📂 打开 log 目录", this);
+    QAction* a_open = new QAction(T("📂 Open Log Directory"), this);
     a_open->setShortcut(QKeySequence("Ctrl+O"));
     connect(a_open, &QAction::triggered, this, &TaskRunnerWindow::onOpenLogDir);
     mlog->addAction(a_open);
@@ -378,7 +380,7 @@ void TaskRunnerWindow::resetUi(int total) {
             QString desc = (i - 1 < sub_descs_.size()) ? sub_descs_[i - 1] : QString();
             QString cmd  = (i - 1 < sub_cmds_.size()) ? sub_cmds_[i - 1] : QString();
             QString label = desc.isEmpty()
-                            ? QString("  ⏳ [%1/%2] 等待…").arg(i).arg(total)
+                            ? T("  ⏳ [%1/%2] waiting...").arg(i).arg(total)
                             : QString("  ⏳ [%1/%2] %3").arg(i).arg(total).arg(desc);
             QListWidgetItem* it = new QListWidgetItem(label, sub_list_);
             it->setForeground(QColor("#888"));
@@ -392,12 +394,12 @@ void TaskRunnerWindow::resetUi(int total) {
     if (progress_) {
         progress_->setRange(0, std::max(total, 1));
         progress_->setValue(0);
-        progress_->setFormat(QString("0 / %1  (sub-task)").arg(total));
+        progress_->setFormat(T("0 / %1  (sub-task)").arg(total));
     }
 
     // 重置 header
     if (lbl_status_) {
-        lbl_status_->setText("⏳ 等待启动");
+        lbl_status_->setText(T("⏳ Waiting"));
         lbl_status_->setStyleSheet(
             "background-color: #444; color: #fff; padding: 4px 14px; "
             "border-radius: 4px; border: 1px solid #888;"
@@ -421,11 +423,11 @@ void TaskRunnerWindow::resetUi(int total) {
     // 清 log
     if (log_view_) {
         log_view_->clear();
-        if (lbl_log_summary_) lbl_log_summary_->setText("📄 实时 log (stdout, 0 行)");
+        if (lbl_log_summary_) lbl_log_summary_->setText(T("📄 Live Log (%1 lines)").arg(0));
     }
 
     // 重置详情区
-    if (lbl_detail_meta_) lbl_detail_meta_->setText("(未选中 sub-task)");
+    if (lbl_detail_meta_) lbl_detail_meta_->setText(T("(no sub-task selected)"));
     if (txt_detail_cmd_) txt_detail_cmd_->clear();
     if (btn_open_sub_log_) btn_open_sub_log_->setEnabled(false);
     if (btn_copy_sub_cmd_) btn_copy_sub_cmd_->setEnabled(false);
@@ -448,14 +450,16 @@ QString TaskRunnerWindow::logDirForCurrentTask() const {
 void TaskRunnerWindow::onOutput(const QString& task_name, const QString& line) {
     if (task_name != task_name_) return;
     if (!log_view_) return;
+    // 2026-10-26 i18n: 显示层做"部分词汇翻译" (Compiling→编译, WARNING:→警告: 等, 仅 zh 模式)
+    const QString display = AbLang::translateLogLine(line);
     // 2026-10-15: 解析 ANSI 颜色 + 剥 ESC 序列 (跟 AbMainWindow 共用 appendColoredLine)
-    appendColoredLine(log_view_, line);
+    appendColoredLine(log_view_, display);
     // 自动滚到底
     QScrollBar* sb = log_view_->verticalScrollBar();
     sb->setValue(sb->maximum());
     // log 摘要
     if (lbl_log_summary_) {
-        lbl_log_summary_->setText(QString("📄 实时 log (stdout, %1 行)").arg(log_view_->blockCount()));
+        lbl_log_summary_->setText(T("📄 Live Log (%1 lines)").arg(log_view_->blockCount()));
     }
 }
 
@@ -487,7 +491,7 @@ void TaskRunnerWindow::onSubStarted(const QString& task_name, int idx, int total
         it->setText(label);
         it->setForeground(QColor("#88ccff"));
         // tooltip: desc + cmd + log 路径
-        QString tip = QString("sub-task [%1/%2]  跑中…\n").arg(idx).arg(total);
+        QString tip = T("sub-task [%1/%2]  running...\n").arg(idx).arg(total);
         if (!desc.isEmpty()) tip += "\n📌 " + desc;
         if (!cmd.isEmpty())  tip += "\n$ " + cmd;
         it->setToolTip(tip);
@@ -511,7 +515,7 @@ void TaskRunnerWindow::onSubStarted(const QString& task_name, int idx, int total
 
     // 更新 status badge
     if (lbl_status_) {
-        lbl_status_->setText(QString("⏳ Running (%1/%2)").arg(idx).arg(total));
+        lbl_status_->setText(T("⏳ Running (%1/%2)").arg(idx).arg(total));
         lbl_status_->setStyleSheet(
             "background-color: #4488aa; color: #fff; padding: 4px 14px; "
             "border-radius: 4px; border: 1px solid #888; font-weight: bold;"
@@ -523,7 +527,7 @@ void TaskRunnerWindow::onSubStarted(const QString& task_name, int idx, int total
     onSubItemClicked();
 
     statusBar()->showMessage(
-        QString("🚀 sub-task [%1/%2] 开始").arg(idx).arg(total), 3000);
+        T("🚀 sub-task [%1/%2] started").arg(idx).arg(total), 3000);
 }
 
 void TaskRunnerWindow::onSubFinished(const QString& task_name, int idx, int total,
@@ -565,7 +569,7 @@ void TaskRunnerWindow::onSubFinished(const QString& task_name, int idx, int tota
             if (s.status == "ok" || s.status == "fail") done++;
         }
         progress_->setValue(done);
-        progress_->setFormat(QString("%1 / %2  (sub-task)").arg(done).arg(total));
+        progress_->setFormat(T("%1 / %2  (sub-task)").arg(done).arg(total));
     }
 
     // 当前执行区
@@ -589,7 +593,7 @@ void TaskRunnerWindow::onSubFinished(const QString& task_name, int idx, int tota
 void TaskRunnerWindow::onSubFailed(const QString& task_name, int idx, int total) {
     if (task_name != task_name_) return;
     statusBar()->showMessage(
-        QString("✗ sub-task [%1/%2] 失败, 后续停止").arg(idx).arg(total), 5000);
+        T("✗ sub-task [%1/%2] failed, rest skipped").arg(idx).arg(total), 5000);
 }
 
 void TaskRunnerWindow::onTaskFinished(const QString& task_name, int exit_code, double elapsed) {
@@ -604,7 +608,7 @@ void TaskRunnerWindow::onTaskFinished(const QString& task_name, int exit_code, d
 
     if (exit_code == 0) {
         if (lbl_status_) {
-            lbl_status_->setText("✓ Done");
+            lbl_status_->setText(T("✓ Done"));
             lbl_status_->setStyleSheet(
                 "background-color: #44aa44; color: #fff; padding: 4px 14px; "
                 "border-radius: 4px; border: 1px solid #888; font-weight: bold;"
@@ -615,25 +619,25 @@ void TaskRunnerWindow::onTaskFinished(const QString& task_name, int exit_code, d
             progress_->setFormat(QString("✓ %1 / %1").arg(progress_->maximum()));
         }
         if (lbl_current_idx_) {
-            lbl_current_idx_->setText("[DONE]");
+            lbl_current_idx_->setText(T("[DONE]"));
             lbl_current_idx_->setStyleSheet(
                 "background-color: #228822; color: #fff; padding: 2px 8px; "
                 "border-radius: 3px;"
             );
         }
         statusBar()->showMessage(
-            QString("✓ %1 完成 (rc=0)  log: %2/latest.log").arg(task_name_, logDirForCurrentTask()),
+            T("✓ %1 done (rc=0)  log: %2/latest.log").arg(task_name_, logDirForCurrentTask()),
             10000);
     } else {
         if (lbl_status_) {
-            lbl_status_->setText(QString("✗ Fail (rc=%1)").arg(exit_code));
+            lbl_status_->setText(T("✗ Fail (rc=%1)").arg(exit_code));
             lbl_status_->setStyleSheet(
                 "background-color: #aa4444; color: #fff; padding: 4px 14px; "
                 "border-radius: 4px; border: 1px solid #888; font-weight: bold;"
             );
         }
         statusBar()->showMessage(
-            QString("✗ %1 失败 (rc=%2)").arg(task_name_).arg(exit_code),
+            T("✗ %1 failed (rc=%2)").arg(task_name_).arg(exit_code),
             10000);
     }
 }
@@ -641,7 +645,7 @@ void TaskRunnerWindow::onTaskFinished(const QString& task_name, int exit_code, d
 void TaskRunnerWindow::onError(const QString& task_name, int err) {
     if (task_name != task_name_) return;
     if (lbl_status_) {
-        lbl_status_->setText("✗ 启动失败");
+        lbl_status_->setText(T("✗ Launch failed"));
         lbl_status_->setStyleSheet(
             "background-color: #aa4444; color: #fff; padding: 4px 14px; "
             "border-radius: 4px; border: 1px solid #888; font-weight: bold;"
@@ -655,7 +659,7 @@ void TaskRunnerWindow::onError(const QString& task_name, int err) {
 // =====================================================================
 void TaskRunnerWindow::onStopClicked() {
     if (runner_ && runner_->isRunning()) {
-        statusBar()->showMessage("⏹ 正在停止 task…", 3000);
+        statusBar()->showMessage(T("⏹ Stopping task..."), 3000);
         runner_->stop();
     }
 }
@@ -663,7 +667,7 @@ void TaskRunnerWindow::onStopClicked() {
 void TaskRunnerWindow::onCopyLog() {
     if (!log_view_) return;
     QApplication::clipboard()->setText(log_view_->toPlainText());
-    statusBar()->showMessage("✓ log 已复制到剪贴板", 3000);
+    statusBar()->showMessage(T("✓ log copied to clipboard"), 3000);
 }
 
 void TaskRunnerWindow::onOpenLogDir() {
@@ -675,12 +679,12 @@ void TaskRunnerWindow::onOpenLogDir() {
         QProcess* p = new QProcess(this);
         p->start(c, {dir});
         if (p->waitForStarted(1500)) {
-            statusBar()->showMessage(QString("📂 打开 %1").arg(dir), 3000);
+            statusBar()->showMessage(T("📂 Opened %1").arg(dir), 3000);
             return;
         }
         delete p;
     }
-    statusBar()->showMessage(QString("⚠ 找不到文件管理器, log 目录: %1").arg(dir), 5000);
+    statusBar()->showMessage(T("⚠ No file manager found, log dir: %1").arg(dir), 5000);
 }
 
 void TaskRunnerWindow::onOpenSubLog() {
@@ -694,31 +698,31 @@ void TaskRunnerWindow::onOpenSubLog() {
         QDir d(dir);
         QStringList files = d.entryList(nameFilters, QDir::Files, QDir::Time);
         if (files.isEmpty()) {
-            statusBar()->showMessage(QString("⚠ 找不到 sub-task %1 的 log").arg(selected_sub_idx_), 5000);
+            statusBar()->showMessage(T("⚠ No log found for sub-task %1").arg(selected_sub_idx_), 5000);
             return;
         }
         log_path = dir + "/" + files.first();
     }
     QDesktopServices::openUrl(QUrl::fromLocalFile(log_path));
-    statusBar()->showMessage(QString("📂 打开 %1").arg(log_path), 3000);
+    statusBar()->showMessage(T("📂 Opened %1").arg(log_path), 3000);
 }
 
 void TaskRunnerWindow::onCopySubCmd() {
     if (selected_sub_idx_ <= 0 || !txt_detail_cmd_) return;
     QApplication::clipboard()->setText(txt_detail_cmd_->toPlainText());
-    statusBar()->showMessage("✓ 完整命令已复制到剪贴板", 3000);
+    statusBar()->showMessage(T("✓ full command copied to clipboard"), 3000);
 }
 
 void TaskRunnerWindow::onLaunchCloudMain() {
     QFileInfo bin(kCloudMainBin);
     if (!bin.isFile()) {
-        QMessageBox::warning(this, "启动失败",
-            QString("找不到 binary:\n%1\n\n请先跑 ac task 编译一次").arg(kCloudMainBin));
+        QMessageBox::warning(this, T("✗ Launch failed"),
+            T("Binary not found:\n%1\n\nRun ac task to build first").arg(kCloudMainBin));
         return;
     }
     QFileInfo lib(kCloudMainCwd + "/libworkspace_v7.so");
     if (!lib.isFile()) {
-        QMessageBox::warning(this, "启动失败",
+        QMessageBox::warning(this, T("✗ Launch failed"),
             QString("找不到 libworkspace_v7.so:\n%1\n\n请检查 workspace_v7_lib 同步").arg(lib.absoluteFilePath()));
         return;
     }
@@ -740,9 +744,9 @@ void TaskRunnerWindow::onLaunchCloudMain() {
     bool started_ok = QProcess::startDetached(
         kCloudMainBin, args, kCloudMainCwd, &pid);
     if (started_ok && pid > 0) {
-        statusBar()->showMessage(QString("🚀 cloud_main 已启动 (pid=%1, Vulkan+Wayland)").arg(pid), 5000);
+        statusBar()->showMessage(T("cloud_main started (pid=%1, Vulkan+Wayland)").arg(pid), 5000);
     } else {
-        QMessageBox::warning(this, "启动失败", QString("QProcess::startDetached 返回失败, 启动失败"));
+        QMessageBox::warning(this, T("✗ Launch failed"), QString("QProcess::startDetached 返回失败, 启动失败"));
     }
 }
 
@@ -750,7 +754,7 @@ void TaskRunnerWindow::onSubItemClicked() {
     if (!sub_list_) return;
     QListWidgetItem* it = sub_list_->currentItem();
     if (!it) {
-        if (lbl_detail_meta_) lbl_detail_meta_->setText("(未选中 sub-task)");
+        if (lbl_detail_meta_) lbl_detail_meta_->setText(T("(no sub-task selected)"));
         if (txt_detail_cmd_) txt_detail_cmd_->clear();
         if (btn_open_sub_log_) btn_open_sub_log_->setEnabled(false);
         if (btn_copy_sub_cmd_) btn_copy_sub_cmd_->setEnabled(false);

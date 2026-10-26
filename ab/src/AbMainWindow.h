@@ -129,9 +129,12 @@ private:
     void buildCentralPanel();   // 2026-09-16 v3: 新中央面板 (顶部 + split + 详情 + 底部按钮)
     void buildStatusBar();
     void wireRunner();
+    // 2026-10-26 i18n: 语言切换后整体重建 UI (菜单/工具栏/中央面板/状态栏 全按新语言生成)
+    void rebuildUi();
     // 2026-10-19 加 — 启动时弹大字体模态窗口显示 ai_build.json 的 startup_prompts.
     //   每段一个 dialog (按 OK 跳下一段), 字体大小 startup_prompt_font_pt (默认 28).
-    void showStartupPrompts();
+    //   allow_modal=false (语言切换 rebuildUi 用): 只回填 🔔 按钮, 不重新弹模态框.
+    void showStartupPrompts(bool allow_modal = true);
 
     void enableRunCloudButton(bool en);
     QString findRunBinary() const;

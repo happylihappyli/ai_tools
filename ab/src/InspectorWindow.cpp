@@ -6,18 +6,22 @@
 #include "InspectorWindow.h"
 #include "AbTaskRunner.h"
 #include "AbTaskInspector.h"
+#include "AbLang.h"   // 2026-10-26: 窗口标题走翻译表
 
 #include <QApplication>
 #include <QString>
 
 namespace ab {
 
+// 2026-10-26: UI 字符串统一走 AbLang::T
+static QString T(const char* s) { return AbLang::T(s); }
+
 InspectorWindow::InspectorWindow(AbTaskRunner* runner,
                                  const AbConfig& cfg,
                                  const QString& cwd,
                                  QWidget* parent)
     : QMainWindow(parent), runner_(runner), cfg_(cfg), cwd_(cwd) {
-    setWindowTitle(QString("ab — 任务检查器 (📋 任务 + ⚙️ 进程 + 🔧 sub-task)"));
+    setWindowTitle(T("ab — Task Inspector (📋 Tasks + ⚙️ Processes + 🔧 sub-task)"));
     resize(900, 600);
 
     buildUi();

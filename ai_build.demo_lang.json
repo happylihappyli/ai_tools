@@ -1,0 +1,22 @@
+{
+  "name": "ai_tools demo_lang",
+  "cwd": "/home/bv/code/ai_tools",
+  "auto": ["demo"],
+  "tasks": [
+    {
+      "name": "demo",
+      "description": "演示编译日志词汇翻译",
+      "cmd": [
+        {
+          "desc": "输出典型编译日志行 → 右侧实时 log 看中文翻译效果",
+          "cmd": "echo 'Compiling editor/editor_node.cpp ...'; echo 'Compiling editor/gui/string_builder.cpp ...'; echo 'Generating editor/file_type_cache.cpp'; echo 'WARNING: msgfmt execution failed'; echo \"editor/main.cpp:12:5: error: 'foo' was not declared\"; echo 'scons: Building targets ...'; echo 'Linking program bin/Debug/cloud_main'; echo 'scons: done building targets.'"
+        }
+      ]
+    }
+  ],
+  "ui": {
+    "title": "ab — 翻译效果演示",
+    "auto_start": true,
+    "prompt": "右侧实时 log 窗口可看到 Compiling/WARNING 等词汇的中文翻译 (文件名/路径保持原样).\n菜单 [视图] → [语言] 可切换 中文/English, 选择后自动保存到 ~/.config/ai_tools/lang.json."
+  }
+}

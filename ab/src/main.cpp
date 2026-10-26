@@ -28,6 +28,7 @@
 #include <iostream>
 #include "AbConfig.h"
 #include "AbTheme.h"
+#include "AbLang.h"      // 2026-10-26: 语言管理 (zh 默认 / en 可切, 存 lang.json)
 #include "AbMainWindow.h"
 
 using namespace ab;
@@ -93,6 +94,7 @@ static void printHelp() {
         << "  ab --auto-exit                  # auto 链全部完成后自动退出 (AI/脚本调用)\n"
         << "  ab --doctor                     # 环境自检\n"
         << "  ab --theme dark|light|solarized|nord  # 强制主题\n"
+        << "  ab --lang zh|en                       # 强制语言 (默认中文, 存 lang.json)\n"
         << "  ab --help                       # 帮助\n"
         << "\n"
         << "task cmd 规则 (重要!):\n"
@@ -160,6 +162,7 @@ int main(int argc, char** argv) {
     bool doctorMode = false;
     bool autoExit = false;  // 2026-10-09 加 — auto 链完成后自动退出
     QString forcedTheme;
+    QString forcedLang;  // 2026-10-26 加 — 强制语言 (--lang=zh|en), 覆盖 lang.json
     for (int i = 1; i < argc; ++i) {
         QString a = argv[i];
         if (a == "--help" || a == "-h") { printHelp(); return 0; }
@@ -170,6 +173,8 @@ int main(int argc, char** argv) {
         else if (a == "--config" && i + 1 < argc) configPath = argv[++i];
         else if (a.startsWith("--theme=")) forcedTheme = a.mid(8);
         else if (a == "--theme" && i + 1 < argc) forcedTheme = argv[++i];
+        else if (a.startsWith("--lang=")) forcedLang = a.mid(7);  // 2026-10-26 加
+        else if (a == "--lang" && i + 1 < argc) forcedLang = argv[++i];
         else if (a.startsWith("--project=")) {
             QString p = a.mid(10);
             QDir d(p);
@@ -231,6 +236,12 @@ int main(int argc, char** argv) {
 
     // 应用主题
     AbTheme::apply(static_cast<int>(AbTheme::parse(cfg.theme)));
+
+    // 2026-10-26: 语言 — --lang=zh|en 强制覆盖 (写 lang.json 持久化); 否则用 lang.json 里的 (默认中文)
+    if (!forcedLang.isEmpty()) {
+        AbLang::apply(static_cast<int>(AbLang::parse(forcedLang)));
+    }
+    std::cerr << "[ab] 语言: " << AbLang::displayName(static_cast<int>(AbLang::current())).toStdString() << "\n";
 
     // 创建窗口
     ab::AbMainWindow w(cfg, configPath);

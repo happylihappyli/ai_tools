@@ -1,0 +1,21 @@
+{
+  "name": "ai_tools",
+  "cwd": "/home/bv/code/ai_tools",
+  "auto": ["build-ab"],
+  "tasks": [
+    {
+      "name": "build-ab",
+      "description": "编译 ab (C++ Qt GUI)",
+      "cmd": [
+        {
+          "desc": "scons 编译 ab (增量, 输出 build/ab + 软链 ~/.local/bin/ab)",
+          "cmd": "scons -C ab -j$(nproc)"
+        }
+      ]
+    }
+  ],
+  "ui": {
+    "title": "ai_tools — ab 自举编译",
+    "auto_start": true
+  }
+}

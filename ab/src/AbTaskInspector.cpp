@@ -1,6 +1,7 @@
 // AbTaskInspector.cpp — 任务 + 进程检查器
 // 2026-09-02: 新增
 #include "AbTaskInspector.h"
+#include "AbLang.h"   // 2026-10-26: UI 字符串走翻译表
 
 #include <QListWidget>  // 2026-09-16 v3: sub-task 列表
 #include <QProgressBar> // 2026-09-16 v3: sub-task 进度条
@@ -21,6 +22,9 @@
 
 namespace ab {
 
+// 2026-10-26: UI 字符串统一走 AbLang::T
+static QString T(const char* s) { return AbLang::T(s); }
+
 static QString historyPath() {
     QStringList p = QStandardPaths::standardLocations(QStandardPaths::ConfigLocation);
     if (!p.isEmpty()) return p.first() + "/ai_tools/task_history.json";
@@ -28,7 +32,7 @@ static QString historyPath() {
 }
 
 AbTaskInspector::AbTaskInspector(QWidget* parent)
-    : QDockWidget("任务检查器", parent) {
+    : QDockWidget(T("Task Inspector"), parent) {
     setObjectName("AbTaskInspectorDock");
     setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable);
     buildUi();
@@ -51,23 +55,23 @@ void AbTaskInspector::buildUi() {
     // 顶部工具行
     QHBoxLayout* top = new QHBoxLayout();
     filter_edit_ = new QLineEdit();
-    filter_edit_->setPlaceholderText("🔍 过滤 (任务名 / 进程名 / PID)");
+    filter_edit_->setPlaceholderText(T("🔍 Filter (task / process / PID)"));
     filter_edit_->setClearButtonEnabled(true);
     connect(filter_edit_, &QLineEdit::textChanged, this, &AbTaskInspector::onFilterChanged);
     top->addWidget(filter_edit_, 1);
 
-    auto_chk_ = new QCheckBox("自动刷新");
+    auto_chk_ = new QCheckBox(T("Auto Refresh"));
     auto_chk_->setChecked(true);
     connect(auto_chk_, &QCheckBox::toggled, this, &AbTaskInspector::onAutoRefreshToggled);
     top->addWidget(auto_chk_);
 
-    refresh_btn_ = new QPushButton("🔄 刷新");
+    refresh_btn_ = new QPushButton(T("🔄 Refresh"));
     connect(refresh_btn_, &QPushButton::clicked, this, &AbTaskInspector::onRefreshClicked);
     top->addWidget(refresh_btn_);
     vl->addLayout(top);
 
     // 状态行
-    info_lbl_ = new QLabel("就绪");
+    info_lbl_ = new QLabel(T("Ready"));
     info_lbl_->setStyleSheet("color: #888; font-size: 11px;");
     vl->addWidget(info_lbl_);
 
@@ -76,7 +80,8 @@ void AbTaskInspector::buildUi() {
     // -- 任务 tab --
     task_tree_ = new QTreeWidget();
     // 2026-09-08 v2: 加 "命令" 列 (从主窗口 GroupBox 合并过来的功能, 让这里双击能跑)
-    task_tree_->setHeaderLabels({"状态", "任务名", "说明", "上次结果", "耗时", "时间", "命令"});
+    task_tree_->setHeaderLabels({T("Status"), T("Task"), T("Description"), T("Last Result"),
+                                 T("Time"), T("Timestamp"), T("Command")});
     task_tree_->setRootIsDecorated(false);
     task_tree_->setAlternatingRowColors(true);
     task_tree_->setColumnWidth(0, 50);
@@ -87,11 +92,11 @@ void AbTaskInspector::buildUi() {
     task_tree_->setColumnWidth(5, 130);
     task_tree_->setColumnWidth(6, 320);
     connect(task_tree_, &QTreeWidget::itemDoubleClicked, this, &AbTaskInspector::onItemDoubleClicked);
-    tabs_->addTab(task_tree_, "📋 任务");
+    tabs_->addTab(task_tree_, T("📋 Tasks"));
 
     // -- 进程 tab --
     proc_tree_ = new QTreeWidget();
-    proc_tree_->setHeaderLabels({"PID", "用户", "已运行", "CPU%", "内存%", "命令"});
+    proc_tree_->setHeaderLabels({"PID", T("User"), T("Elapsed"), "CPU%", T("Memory%"), T("Command")});
     proc_tree_->setRootIsDecorated(false);
     proc_tree_->setAlternatingRowColors(true);
     proc_tree_->setColumnWidth(0, 60);
@@ -100,7 +105,7 @@ void AbTaskInspector::buildUi() {
     proc_tree_->setColumnWidth(3, 60);
     proc_tree_->setColumnWidth(4, 60);
     connect(proc_tree_, &QTreeWidget::itemDoubleClicked, this, &AbTaskInspector::onItemDoubleClicked);
-    tabs_->addTab(proc_tree_, "⚙️ 进程");
+    tabs_->addTab(proc_tree_, T("⚙️ Processes"));
 
     // -- 2026-09-16 v3: sub-task tab --
     sub_task_panel_ = new QWidget();
@@ -108,14 +113,14 @@ void AbTaskInspector::buildUi() {
     sub_vl->setContentsMargins(8, 8, 8, 8);
     sub_vl->setSpacing(4);
 
-    sub_task_title_ = new QLabel("⏸ 暂无任务在跑");
+    sub_task_title_ = new QLabel(T("⏸ No task running"));
     sub_task_title_->setStyleSheet("color: #88ccff; font-size: 12px; font-weight: bold;");
     sub_vl->addWidget(sub_task_title_);
 
     sub_task_prog_ = new QProgressBar();
     sub_task_prog_->setRange(0, 1);  // 防止 0/0 显示异常
     sub_task_prog_->setValue(0);
-    sub_task_prog_->setFormat("%v / %m  (sub-task)");
+    sub_task_prog_->setFormat(T("%v / %m  (sub-task)"));
     sub_task_prog_->setFixedHeight(16);
     sub_vl->addWidget(sub_task_prog_);
 
@@ -199,7 +204,7 @@ void AbTaskInspector::refreshTasks() {
         auto* it = new QTreeWidgetItem();
         QString icon = "⏸";
         QString rc_text = "—";
-        if (s.status == "running") { icon = "🟡"; rc_text = "跑中"; }
+        if (s.status == "running") { icon = "🟡"; rc_text = T("running"); }
         else if (s.status == "ok") { icon = "✓"; rc_text = QString("rc=%1").arg(s.last_rc); }
         else if (s.status == "err") { icon = "✗"; rc_text = QString("rc=%1").arg(s.last_rc); }
         it->setText(0, icon);
@@ -229,7 +234,7 @@ void AbTaskInspector::refreshTasks() {
         shown++;
     }
     if (info_lbl_) {
-        info_lbl_->setText(QString("任务: %1 个 (显示 %2) | 当前跑: %3")
+        info_lbl_->setText(T("Tasks: %1 (showing %2) | current: %3")
             .arg(static_cast<int>(cfg_.tasks.size())).arg(shown)
             .arg(current_running_.isEmpty() ? "—" : current_running_));
     }
@@ -259,7 +264,7 @@ void AbTaskInspector::refreshProcesses() {
     p.start("ps", QStringList() << "-eo" << "pid,user,etime,pcpu,pmem,comm,args"
                                 << "--no-headers");
     if (!p.waitForFinished(2000)) {
-        if (info_lbl_) info_lbl_->setText("进程刷新失败 (ps 超时)");
+        if (info_lbl_) info_lbl_->setText(T("Process refresh failed (ps timeout)"));
         return;
     }
     QString out = QString::fromUtf8(p.readAllStandardOutput());
@@ -309,7 +314,7 @@ void AbTaskInspector::refreshProcesses() {
         shown++;
     }
     if (info_lbl_) {
-        info_lbl_->setText(QString("任务: %1 个 | 进程: %2 个 (项目相关) | 当前跑: %3")
+        info_lbl_->setText(T("Tasks: %1 | Processes: %2 (project related) | current: %3")
             .arg(static_cast<int>(cfg_.tasks.size())).arg(shown)
             .arg(current_running_.isEmpty() ? "—" : current_running_));
     }
@@ -317,8 +322,8 @@ void AbTaskInspector::refreshProcesses() {
 
 void AbTaskInspector::killProcess(int pid) {
     if (pid <= 0) return;
-    auto ret = QMessageBox::question(this, "确认",
-        QString("杀进程 pid=%1 ?").arg(pid),
+    auto ret = QMessageBox::question(this, T("Confirm"),
+        T("Kill process pid=%1 ?").arg(pid),
         QMessageBox::Yes | QMessageBox::No);
     if (ret != QMessageBox::Yes) return;
     QProcess::execute("kill", QStringList() << "-TERM" << QString::number(pid));
@@ -393,13 +398,13 @@ void AbTaskInspector::onItemDoubleClicked(QTreeWidgetItem* it, int /*col*/) {
         //   之前这里只提示用户用 F5, 现在任务列表主窗口已删除, 这里就是唯一的任务入口
         QString name = it->text(1);
         if (name.isEmpty()) return;
-        if (info_lbl_) info_lbl_->setText(QString("⚡ 触发跑任务: %1").arg(name));
+        if (info_lbl_) info_lbl_->setText(T("⚡ trigger task: %1").arg(name));
         emit requestRunTask(name);
     } else if (src == proc_tree_) {
         int pid = it->data(0, Qt::UserRole).toInt();
         QString comm = it->text(5);
-        auto ret = QMessageBox::question(this, "进程操作",
-            QString("进程: %1\nPID: %2\n\n点 Yes 杀进程 (TERM + KILL), No 取消").arg(comm).arg(pid),
+        auto ret = QMessageBox::question(this, T("Process Action"),
+            T("Process: %1\nPID: %2\n\nYes = kill (TERM + KILL), No = cancel").arg(comm).arg(pid),
             QMessageBox::Yes | QMessageBox::No);
         if (ret == QMessageBox::Yes) {
             killProcess(pid);
@@ -439,10 +444,10 @@ void AbTaskInspector::switchToSubTaskTab(const QString& task_name) {
     int idx = tabs_->indexOf(sub_task_panel_);
     if (idx >= 0) tabs_->setCurrentIndex(idx);
     if (sub_task_title_) {
-        sub_task_title_->setText(QString("🔧 %1 (%2 sub-task%3)")
+        // 2026-10-26 i18n: 顺带修 %3/%4 占位符 bug (原来只 arg 2 个, %3 被 total 抢占, %4 残留)
+        sub_task_title_->setText(T("🔧 %1 (%2 sub-tasks)")
             .arg(task_name)
-            .arg(current_sub_states_.size())
-            .arg(current_sub_states_.size() > 1 ? "s" : ""));
+            .arg(current_sub_states_.size()));
         sub_task_title_->setStyleSheet("color: #88ccff; font-size: 12px; font-weight: bold;");
     }
     if (sub_task_prog_) {
@@ -450,7 +455,7 @@ void AbTaskInspector::switchToSubTaskTab(const QString& task_name) {
         sub_task_prog_->setValue(0);
     }
     if (sub_task_list_) sub_task_list_->clear();
-    if (sub_task_info_) sub_task_info_->setText("进度: 0 / " + QString::number(current_sub_states_.size()));
+    if (sub_task_info_) sub_task_info_->setText(T("Progress: 0 / %1").arg(current_sub_states_.size()));
     sub_item_by_idx_.clear();
 }
 
@@ -518,7 +523,7 @@ void AbTaskInspector::onTaskSubStarted(const QString& task_name,
         sub_task_prog_->setValue(idx - 1);  // 让当前条还没"完成"
     }
     if (sub_task_info_) {
-        sub_task_info_->setText(QString("进度: %1 / %2  ·  当前: %3")
+        sub_task_info_->setText(T("Progress: %1 / %2  ·  current: %3")
             .arg(idx - 1).arg(total).arg(desc.isEmpty() ? cmd : desc));
     }
 }
@@ -554,7 +559,7 @@ void AbTaskInspector::onTaskSubFinished(const QString& task_name,
         sub_task_prog_->setValue(idx);
     }
     if (sub_task_info_) {
-        sub_task_info_->setText(QString("进度: %1 / %2  ·  上一步: %3s (rc=%4)")
+        sub_task_info_->setText(T("Progress: %1 / %2  ·  last: %3s (rc=%4)")
             .arg(idx).arg(total).arg(dt_sec, 0, 'f', 1).arg(rc));
     }
 }
@@ -563,12 +568,12 @@ void AbTaskInspector::onTaskSubFailed(const QString& task_name,
                                       int idx, int total) {
     if (task_name != current_subtask_task_) return;
     if (sub_task_title_) {
-        sub_task_title_->setText(QString("✗✗ %1  (第 %3/%4 步失败, 后续不跑)")
+        sub_task_title_->setText(T("✗✗ %1  (step %2/%3 failed, rest skipped)")
             .arg(task_name).arg(idx).arg(total));
         sub_task_title_->setStyleSheet("color: #f48771; font-size: 12px; font-weight: bold;");
     }
     if (sub_task_info_) {
-        sub_task_info_->setText(QString("✗ 失败: 第 %1/%2 步 → 后续 sub-task 跳过").arg(idx).arg(total));
+        sub_task_info_->setText(T("✗ failed: step %1/%2 → rest skipped").arg(idx).arg(total));
     }
 }
 

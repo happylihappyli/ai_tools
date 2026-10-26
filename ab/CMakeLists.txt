@@ -29,6 +29,7 @@ set(AB_SOURCES
     src/AbMainWindow.cpp
     src/AbConfig.cpp
     src/AbTheme.cpp
+    src/AbLang.cpp
     src/AbTaskRunner.cpp
     src/AbLogDock.cpp
     src/AbTaskInspector.cpp
@@ -41,6 +42,7 @@ set(AB_HEADERS
     src/AbMainWindow.h
     src/AbConfig.h
     src/AbTheme.h
+    src/AbLang.h
     src/AbTaskRunner.h
     src/AbLogDock.h
     src/AbTaskInspector.h

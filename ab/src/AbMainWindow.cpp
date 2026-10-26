@@ -3,6 +3,7 @@
 #include "AbTaskRunner.h"
 #include "AbLogDock.h"
 #include "AbTheme.h"
+#include "AbLang.h"      // 2026-10-26: 语言管理 + T() 翻译 + log 词汇翻译
 #include "AbTaskInspector.h"  // 2026-09-02: 任务/进程检查器 (现在通过 InspectorWindow 间接访问)
 #include "InspectorWindow.h"  // 2026-09-16 v4: 独立 InspectorWindow (包 AbTaskInspector)
 #include "TaskRunnerWindow.h" // 2026-09-16: 独立任务运行器窗口 (仿 ac_task_runner_gui.py)
@@ -60,6 +61,9 @@
 
 namespace ab {
 
+// 2026-10-26: UI 字符串统一走 AbLang::T (双向翻译表, zh 默认 / en 可切, 视图→语言)
+static QString T(const char* s) { return AbLang::T(s); }
+
 AbMainWindow::AbMainWindow(const AbConfig& cfg, const QString& configPath, QWidget* parent)
     : QMainWindow(parent),
       cfg_(cfg),
@@ -99,13 +103,15 @@ AbMainWindow::AbMainWindow(const AbConfig& cfg, const QString& configPath, QWidg
 
     buildFromConfig();
 
-    log("info", QString("ab 启动 v1.0.0"));
-    log("info", QString("项目: %1").arg(cfg_.cwd));
-    log("info", QString("任务数: %1").arg(static_cast<int>(cfg_.tasks.size())));
-    log("info", QString("主题: %1").arg(cfg_.theme));
+    log("info", T("ab started v1.0.0"));
+    log("info", T("Project: %1").arg(cfg_.cwd));
+    log("info", T("Tasks: %1").arg(static_cast<int>(cfg_.tasks.size())));
+    log("info", T("Theme: %1").arg(cfg_.theme));
+    // 2026-10-26 i18n: 显示当前语言 (视图 → 语言 可切, 存 ~/.config/ai_tools/lang.json)
+    log("info", T("Language: %1").arg(AbLang::displayName(static_cast<int>(AbLang::current()))));
     // 2026-09-08 v4: auto 链也 log 一份, 这样 log dock 完整, 不必去状态栏看
-    log("info", QString("auto 链: %1")
-        .arg(cfg_.auto_chain.isEmpty() ? "(无)" : cfg_.auto_chain.join(" → ")));
+    log("info", T("Auto chain: %1")
+        .arg(cfg_.auto_chain.isEmpty() ? T("(none)") : cfg_.auto_chain.join(" → ")));
 
     // 检查 cloud_main (如果配置了 run_after_build)
     if (!cfg_.run_after_build.binary_path.isEmpty()) {
@@ -113,9 +119,9 @@ AbMainWindow::AbMainWindow(const AbConfig& cfg, const QString& configPath, QWidg
         if (!bin.isEmpty()) {
             cloud_binary_ = bin;
             enableRunCloudButton(true);
-            log("ok", QString("✓ %1 已就绪").arg(QFileInfo(bin).fileName()));
+            log("ok", T("✓ %1 ready").arg(QFileInfo(bin).fileName()));
         } else {
-            log("warn", QString("未找到 %1, 编译后可启用").arg(cfg_.run_after_build.binary_path));
+            log("warn", T("%1 not found, enabled after build").arg(cfg_.run_after_build.binary_path));
         }
     }
 
@@ -126,7 +132,7 @@ AbMainWindow::AbMainWindow(const AbConfig& cfg, const QString& configPath, QWidg
     const char* ac_no_tts = std::getenv("AC_NO_TTS");
     tts_enabled_   = !(ac_no_tts && std::string(ac_no_tts) == "1");
     if (ac_binary_.isEmpty()) {
-        log("warn", "未找到 ac 命令, 菜单 [GitHub Token 管理] 等会失败 (PATH 不全?)");
+        log("warn", T("✗ ac not found, cannot open Token Manager (install ai_tools and check ~/.local/bin in PATH)"));
     } else {
         log("info", QString("ac: %1").arg(ac_binary_));
     }
@@ -136,11 +142,11 @@ AbMainWindow::AbMainWindow(const AbConfig& cfg, const QString& configPath, QWidg
         log("info", QString("ar: %1").arg(ar_binary_));
     }
     if (spd_say_binary_.isEmpty()) {
-        log("warn", "未找到 spd-say, TTS 播报不可用");
+        log("warn", T("TTS unavailable: spd-say not found"));
     } else if (!tts_enabled_) {
         log("info", QString("TTS 已关闭 (AC_NO_TTS=1, spd-say=%1)").arg(spd_say_binary_));
     } else {
-        log("info", QString("TTS 已启用: %1").arg(spd_say_binary_));
+        log("info", T("TTS enabled: %1").arg(spd_say_binary_));
     }
 
     // 2026-09-08 v3: 把"任务列表在哪"这种提示信息放到操作日志里, 主窗口不显示
@@ -209,7 +215,7 @@ void AbMainWindow::wireRunner() {
     //   在 log panel + stderr (sandbox 里 agent tail /tmp/cloud_editor.log 也能看到).
     connect(runner_, &AbTaskRunner::error_log_written,
             this, [this](const QString& task_name, const QString& log_path, int exit_code) {
-                log("error", QString("[%1] rc=%2 错误日志: %3").arg(task_name).arg(exit_code).arg(log_path));
+                log("error", T("[%1] rc=%2 error log: %3").arg(task_name).arg(exit_code).arg(log_path));
                 fprintf(stderr, "[ab-error-log] task=%s rc=%d file=%s\n",
                     task_name.toUtf8().constData(), exit_code, log_path.toUtf8().constData());
                 fflush(stderr);
@@ -242,7 +248,7 @@ void AbMainWindow::buildFromConfig() {
                 this, [this](const QString &path) {
             // fileChanged 触发时旧 inode 已释放, watcher 自动失去监听.
             // 100ms 后重新 addPath 让下次写再次触发 (覆盖 vi/sed/Edit 多次写的场景)
-            log("ok", QString("[auto-reload] ai_build.json 改动, 自动重读..."));
+            log("ok", T("[auto-reload] ai_build.json changed, re-reading..."));
             QTimer::singleShot(100, this, [this, path]() {
                 reloadConfig();
                 if (config_watcher_ && !config_watcher_->files().contains(path)) {
@@ -252,12 +258,12 @@ void AbMainWindow::buildFromConfig() {
         });
     }
     // F5 快捷键手动 reload (auto-reload 出问题时强制刷新)
-    QAction* reload_act = new QAction("重读 ai_build.json", this);
+    QAction* reload_act = new QAction(T("Reload ai_build.json"), this);
     reload_act->setShortcut(QKeySequence("F5"));
-    reload_act->setToolTip("重读 ai_build.json + 重建工具栏/菜单/按钮 (免去重启 ab)");
+    reload_act->setToolTip(T("Reload ai_build.json + rebuild toolbar/menus/buttons (no ab restart needed)"));
     addAction(reload_act);  // 加到主窗口, 全局快捷键生效
     connect(reload_act, &QAction::triggered, this, [this]() {
-        log("ok", "[F5] 重读 ai_build.json...");
+        log("ok", T("[F5] re-reading ai_build.json..."));
         reloadConfig();
     });
 }
@@ -267,7 +273,7 @@ void AbMainWindow::buildFromConfig() {
 //   ai_build.json 设 ui.prompt_modal=true 才弹模态 (强制用户看完).
 //   "如果是自动的, 一般也不用提示, 每个子任务都有说明" — auto 链跑起来后
 //   🔧 sub-task tab 实时显示, 不需要默认 prompt 弹窗.
-void AbMainWindow::showStartupPrompts() {
+void AbMainWindow::showStartupPrompts(bool allow_modal) {
     if (cfg_.startup_prompts.isEmpty()) {
         if (panel_btn_prompts_) panel_btn_prompts_->setVisible(false);
         return;
@@ -282,11 +288,11 @@ void AbMainWindow::showStartupPrompts() {
         if (panel_btn_prompts_) panel_btn_prompts_->setVisible(false);
         return;
     }
-    if (cfg_.startup_prompt_modal) {
+    if (cfg_.startup_prompt_modal && allow_modal) {
         // 强制模态: 弹大字体 QMessageBox 串行, 用户必须 OK 一路点完
         for (int i = 0; i < cfg_.startup_prompts.size(); ++i) {
             const QString& text = cfg_.startup_prompts[i];
-            QString title = QString("⚡ 启动提示 (%1/%2)")
+            QString title = T("⚡ Startup Tip (%1/%2)")
                 .arg(i + 1).arg(cfg_.startup_prompts.size());
             QMessageBox box(this);
             box.setWindowTitle(title);
@@ -324,7 +330,7 @@ void AbMainWindow::showStartupPrompts() {
             });
         }
         panel_btn_prompts_->setText(QString("🔔 (%1)").arg(cfg_.startup_prompts.size()));
-        panel_btn_prompts_->setToolTip(QString("启动提示 %1 段, 点开看").arg(cfg_.startup_prompts.size()));
+        panel_btn_prompts_->setToolTip(T("Startup tips: %1 sections (click 🔔 to view)").arg(cfg_.startup_prompts.size()));
         panel_btn_prompts_->setVisible(true);
         log("info", QString("[startup-prompt] %1 段提示已挂到 🔔 按钮 (默认非模态, 点开看)")
             .arg(cfg_.startup_prompts.size()));
@@ -341,16 +347,16 @@ void AbMainWindow::buildBuiltInMenus() {
     QMenuBar* mb = menuBar();
 
     // --- 文件 (&F) ---
-    QMenu* m_file = mb->addMenu("文件(&F)");
+    QMenu* m_file = mb->addMenu(T("File (&F)"));
     {
-        QAction* a = m_file->addAction("GitHub Token 管理...");
+        QAction* a = m_file->addAction(T("GitHub Token Manager..."));
         a->setShortcut(QKeySequence("Ctrl+G"));
         a->setData("open_ght");
         connect(a, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
         actions_["open_ght"] = a;
     }
     {
-        QAction* a = m_file->addAction("备份项目...");
+        QAction* a = m_file->addAction(T("Backup Project..."));
         a->setShortcut(QKeySequence("Ctrl+B"));
         a->setData("bak");
         connect(a, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
@@ -358,7 +364,7 @@ void AbMainWindow::buildBuiltInMenus() {
     }
     m_file->addSeparator();
     {
-        QAction* a = m_file->addAction("退出");
+        QAction* a = m_file->addAction(T("Quit"));
         a->setShortcut(QKeySequence("Ctrl+Q"));
         a->setData("quit");
         connect(a, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
@@ -366,16 +372,16 @@ void AbMainWindow::buildBuiltInMenus() {
     }
 
     // --- 工具 (&T) ---
-    QMenu* m_tools = mb->addMenu("工具(&T)");
+    QMenu* m_tools = mb->addMenu(T("Tools (&T)"));
     {
-        QAction* a = m_tools->addAction("GitHub Token 诊断");
+        QAction* a = m_tools->addAction(T("GitHub Token Diagnostics"));
         a->setShortcut(QKeySequence("Ctrl+D"));
         a->setData("diag");
         connect(a, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
         actions_["diag"] = a;
     }
     {
-        QAction* a = m_tools->addAction("代理测试...");
+        QAction* a = m_tools->addAction(T("Proxy Test..."));
         a->setShortcut(QKeySequence("Ctrl+P"));
         a->setData("proxy_test");
         connect(a, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
@@ -383,7 +389,7 @@ void AbMainWindow::buildBuiltInMenus() {
     }
     m_tools->addSeparator();
     {
-        QAction* a = m_tools->addAction("TTS 播报...");
+        QAction* a = m_tools->addAction(T("TTS Speak..."));
         a->setShortcut(QKeySequence("Ctrl+T"));
         a->setData("tts");
         connect(a, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
@@ -395,16 +401,16 @@ void AbMainWindow::buildBuiltInMenus() {
     //   这两个是次要操作, 不需要默认占用工具栏.
     //   Ctrl+L = 复制 log (一键复制当前 panel log 到剪贴板)
     //   Ctrl+Shift+O = 打开 log 目录 (用系统文件管理器)
-    QMenu* m_log = mb->addMenu("日志(&L)");
+    QMenu* m_log = mb->addMenu(T("Log (&L)"));
     {
-        QAction* a = m_log->addAction("📋 复制 log");
+        QAction* a = m_log->addAction(T("📋 Copy Log"));
         a->setShortcut(QKeySequence("Ctrl+L"));
         a->setData("copy_log");
         connect(a, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
         actions_["copy_log"] = a;
     }
     {
-        QAction* a = m_log->addAction("📂 打开 log 目录");
+        QAction* a = m_log->addAction(T("📂 Open Log Directory"));
         a->setShortcut(QKeySequence("Ctrl+Shift+O"));
         a->setData("open_log_dir");
         connect(a, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
@@ -412,9 +418,9 @@ void AbMainWindow::buildBuiltInMenus() {
     }
 
     // --- 视图 (&V) ---
-    QMenu* m_view = mb->addMenu("视图(&V)");
+    QMenu* m_view = mb->addMenu(T("View (&V)"));
     {
-        QAction* a = m_view->addAction("显示日志面板");
+        QAction* a = m_view->addAction(T("Show Log Panel"));
         a->setShortcut(QKeySequence("Ctrl+Shift+L"));
         a->setCheckable(true);
         a->setChecked(cfg_.show_log_dock);
@@ -425,7 +431,7 @@ void AbMainWindow::buildBuiltInMenus() {
     {
         // 2026-09-16 v4: 任务检查器改为独立窗口 (主窗口不再 dock)
         //   菜单改为"打开任务检查器" (一次性打开, 跟 TaskRunnerWindow 一样)
-        QAction* a = m_view->addAction("📋 打开任务检查器");
+        QAction* a = m_view->addAction(T("📋 Open Task Inspector"));
         a->setShortcut(QKeySequence("Ctrl+I"));
         a->setData("open_inspector");
         connect(a, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
@@ -433,12 +439,12 @@ void AbMainWindow::buildBuiltInMenus() {
     }
     // 2026-09-02: 主题改成 submenu 4 选 1 (单选 QActionGroup)
     {
-        QMenu* m_theme = m_view->addMenu("主题(&T)");
+        QMenu* m_theme = m_view->addMenu(T("Theme (&T)"));
         QActionGroup* group = new QActionGroup(this);
         group->setExclusive(true);
         AbTheme::Kind cur = AbTheme::current();
         for (int k = 0; k < AbTheme::NumThemes; ++k) {
-            QAction* a = m_theme->addAction(AbTheme::displayName(k));
+            QAction* a = m_theme->addAction(T(AbTheme::displayName(k).toUtf8().constData()));
             a->setCheckable(true);
             a->setChecked(k == cur);
             a->setData(QString("theme:%1").arg(AbTheme::shortName(k)));
@@ -447,11 +453,28 @@ void AbMainWindow::buildBuiltInMenus() {
             actions_[QString("theme:%1").arg(AbTheme::shortName(k))] = a;
         }
     }
+    // 2026-10-26 i18n: 语言子菜单 (中文/English 单选, 自动保存 ~/.config/ai_tools/lang.json)
+    //   切换后 rebuildUi() 整体重建菜单/工具栏/面板, 立即生效
+    {
+        QMenu* m_lang = m_view->addMenu(T("Language (&L)"));
+        QActionGroup* lang_group = new QActionGroup(this);
+        lang_group->setExclusive(true);
+        AbLang::Kind cur_lang = AbLang::current();
+        for (int k = 0; k < AbLang::NumLangs; ++k) {
+            QAction* a = m_lang->addAction(AbLang::displayName(k));
+            a->setCheckable(true);
+            a->setChecked(k == cur_lang);
+            a->setData(QString("lang:%1").arg(AbLang::shortName(k)));
+            connect(a, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
+            lang_group->addAction(a);
+            actions_[QString("lang:%1").arg(AbLang::shortName(k))] = a;
+        }
+    }
 
     // --- 帮助 (&H) ---
-    QMenu* m_help = mb->addMenu("帮助(&H)");
+    QMenu* m_help = mb->addMenu(T("Help (&H)"));
     {
-        QAction* a = m_help->addAction("关于 ab...");
+        QAction* a = m_help->addAction(T("About ab..."));
         a->setData("about");
         connect(a, &QAction::triggered, this, &AbMainWindow::onActionTriggered);
         actions_["about"] = a;
@@ -460,7 +483,7 @@ void AbMainWindow::buildBuiltInMenus() {
 
 // 2026-09-02: 框架内置通用工具栏 (跑选中/跑 Auto/停止 - 所有 task runner 通用)
 void AbMainWindow::buildBuiltInToolbar() {
-    QToolBar* tb = addToolBar("主工具栏");
+    QToolBar* tb = addToolBar(T("Main Toolbar"));
     tb->setObjectName("AbMainToolBar");
     tb->setMovable(true);
     tb->setFloatable(true);
@@ -476,8 +499,8 @@ void AbMainWindow::buildBuiltInToolbar() {
 
     // 2026-09-18: disable_built_in_toolbar=true → 完全跳过默认按钮, 只显 ui.toolbar 自定义按钮
     if (!cfg_.disable_built_in_toolbar) {
-        add("▶", "run_selected", "跑选中任务 (F5)", "F5");
-        add("⚡", "run_auto",     "跑 Auto 链 (F6)", "F6");
+        add("▶", "run_selected", T("Run selected task (F5)"), "F5");
+        add("⚡", "run_auto",     T("Run Auto chain (F6)"), "F6");
         tb->addSeparator();
     }
 
@@ -485,22 +508,24 @@ void AbMainWindow::buildBuiltInToolbar() {
     // 2026-09-18: disable_built_in_toolbar=true → 也跳过 run_after_build 5 个按钮
     if (!cfg_.disable_built_in_toolbar && !cfg_.run_after_build.binary_path.isEmpty()) {
         QString binary_name = QFileInfo(cfg_.run_after_build.binary_path).fileName();
-        QString btn_label = cfg_.run_after_build.button_label.isEmpty()
-                            ? QString("🚀 启动 %1").arg(binary_name)
-                            : cfg_.run_after_build.button_label;
-        add("⚡ 编译并启动 (Vulkan)", "build_and_run",
-            "编译当前项目 (走 build+deploy task), 成功后自动调 start_cloud_main.sh (Vulkan)", "Ctrl+Shift+R");
-        add("⚡ 编译并启动 (OpenGL)", "build_and_run_gl",
-            "编译当前项目, 成功后自动调 start_cloud_main.sh --gl (OpenGL 兼容模式)", "Ctrl+Shift+E");
+        // 默认按钮文案 "🚀 启动" 走翻译表; ai_build.json 自定义的 label 原样使用
+        QString btn_label = cfg_.run_after_build.button_label;
+        if (btn_label.isEmpty() || btn_label == QString::fromUtf8("🚀 启动")) {
+            btn_label = T("🚀 Run");
+        }
+        add(T("⚡ Build && Run (Vulkan)"), "build_and_run",
+            T("Build project (build+deploy task), then start start_cloud_main.sh (Vulkan)"), "Ctrl+Shift+R");
+        add(T("⚡ Build && Run (OpenGL)"), "build_and_run_gl",
+            T("Build project, then start start_cloud_main.sh --gl (OpenGL compat)"), "Ctrl+Shift+E");
         add(btn_label, "run_cloud",
-            "启动已编译的 " + binary_name);
-        add("🟢 启动兼容模式", "run_cloud_gl",
-            "启动已编译的 " + binary_name + " (OpenGL 兼容模式)");
-        add("🎯 AR 运行工具", "open_ar",
-            QString::fromUtf8("调 ac ar 打开 AI Run 运行工具 (读 ai_build.json run_panel 段)"));
+            T("Run compiled %1").arg(binary_name));
+        add(T("🟢 Run Compat Mode"), "run_cloud_gl",
+            T("Run compiled %1 (OpenGL compat mode)").arg(binary_name));
+        add(T("🎯 AR Runner"), "open_ar",
+            T("Open AI Run tool via ac ar (reads ai_build.json run_panel)"));
         tb->addSeparator();
-        add("■ 停止", "stop",
-            "停止当前 task", "F7");
+        add(T("■ Stop"), "stop",
+            T("Stop current task"), "F7");
     }
 }
 
@@ -529,12 +554,12 @@ void AbMainWindow::buildCentralPanel() {
     // 2026-09-16 v7: 把 Stop 按钮放到顶部 QToolBar, 节省底部高度, 让 sub-task 列表可以显示更多行
     // 2026-09-20: 进一步精简工具栏 — 只保留 Stop (核心控制), 复制 log / 打开 log 目录
     //   移到菜单的 "日志(&L)" 项, 默认工具栏不再提供这些次要操作.
-    panel_toolbar_ = new QToolBar("操作", this);
+    panel_toolbar_ = new QToolBar(T("Actions"), this);
     panel_toolbar_->setMovable(false);
     panel_toolbar_->setIconSize(QSize(16, 16));
     // 2026-10-19 fix-theme: 让主题 QSS 接管 toolbar 背景 (不硬编码)
 
-    panel_btn_stop_ = new QPushButton("⏹ Stop");
+    panel_btn_stop_ = new QPushButton(T("⏹ Stop"));
     // Stop 按钮用 role=danger (QSS 已配 QPushButton[role="danger"])
     panel_btn_stop_->setProperty("role", "danger");
     connect(panel_btn_stop_, &QPushButton::clicked, this, &AbMainWindow::onPanelStopClicked);
@@ -556,7 +581,7 @@ void AbMainWindow::buildCentralPanel() {
     hl->setContentsMargins(8, 4, 8, 4);
     hl->setSpacing(12);
 
-    panel_lbl_title_ = new QLabel("⏸ 暂无任务");
+    panel_lbl_title_ = new QLabel(T("⏸ No Task"));
     panel_lbl_title_->setFont(QFont("sans-serif", 14, QFont::Weight::Bold));
     // 标题色跟随主题 (蓝色强调), 但 QSS 全局有 QLabel, 这里只覆盖需要强调的
     hl->addWidget(panel_lbl_title_);
@@ -567,7 +592,7 @@ void AbMainWindow::buildCentralPanel() {
     panel_lbl_elapsed_->setFont(QFont("monospace", 11));
     hl->addWidget(panel_lbl_elapsed_);
 
-    panel_lbl_status_ = new QLabel("⏳ 等待启动");
+    panel_lbl_status_ = new QLabel(T("⏳ Waiting"));
     panel_lbl_status_->setFont(QFont("sans-serif", 11, QFont::Weight::Bold));
     // status badge 用 dynamicProperty [level] 让主题 QSS 接管 (ok/err/warn/info 已在 QSS)
     panel_lbl_status_->setProperty("level", "info");
@@ -578,7 +603,7 @@ void AbMainWindow::buildCentralPanel() {
     //   用户点按钮展开 prompt list (非模态). 要强制模态, ai_build.json 设 ui.prompt_modal=true.
     panel_btn_prompts_ = new QToolButton();
     panel_btn_prompts_->setText("🔔");
-    panel_btn_prompts_->setToolTip("启动提示 (点开看)");
+    panel_btn_prompts_->setToolTip(T("Startup tips (click to view)"));
     panel_btn_prompts_->setVisible(false);  // 默认隐藏, 有 prompt 才显示
     panel_btn_prompts_->setPopupMode(QToolButton::ToolButtonPopupMode::InstantPopup);
     panel_btn_prompts_->setMenu(new QMenu(panel_btn_prompts_));  // 占位, 后填
@@ -589,17 +614,17 @@ void AbMainWindow::buildCentralPanel() {
     //     [auto-exit 倒计时] [___3___秒] [✕ 取消退出 (3s)]
     //   spinbox 改 cfg_.auto_exit_wait_sec (QSettings 持久化); cancel 按钮设 cancel_auto_exit_=true
     //   timer 检查到就停 quit, 不退.
-    QLabel* lbl_wait = new QLabel("auto-exit 倒计时:");
+    QLabel* lbl_wait = new QLabel(T("auto-exit countdown:"));
     lbl_wait->setFont(QFont("sans", 9));
     hl->addWidget(lbl_wait);
     auto_exit_wait_spin_ = new QSpinBox();
     auto_exit_wait_spin_->setRange(0, 60);
-    auto_exit_wait_spin_->setSuffix("秒");
+    auto_exit_wait_spin_->setSuffix(T(" sec"));
     auto_exit_wait_spin_->setValue(cfg_.auto_exit_wait_sec);
-    auto_exit_wait_spin_->setToolTip("auto 链跑完后等几秒自动退出. 0 = 立即退. 范围 [0, 60]");
+    auto_exit_wait_spin_->setToolTip(T("Wait N seconds before auto-exit after auto chain finishes. 0 = exit immediately. Range [0, 60]"));
     hl->addWidget(auto_exit_wait_spin_);
-    auto_exit_cancel_btn_ = new QPushButton("✕ 取消退出");
-    auto_exit_cancel_btn_->setToolTip("auto-exit 倒计时中点这个取消退出 (GUI 留着)");
+    auto_exit_cancel_btn_ = new QPushButton(T("✕ Cancel Exit"));
+    auto_exit_cancel_btn_->setToolTip(T("Click to cancel the auto-exit countdown (keep GUI open)"));
     auto_exit_cancel_btn_->setVisible(false);
     hl->addWidget(auto_exit_cancel_btn_);
     connect(auto_exit_wait_spin_, QOverload<int>::of(&QSpinBox::valueChanged),
@@ -612,12 +637,12 @@ void AbMainWindow::buildCentralPanel() {
                 // QSettings 也存一份 (用户跨项目用)
                 QSettings s("ai_tools", "ab");
                 s.setValue("auto_exit_wait_sec", cfg_.auto_exit_wait_sec);
-                log("info", QString("auto-exit 等待时间设 %1 秒 (写回 ai_build.json)").arg(cfg_.auto_exit_wait_sec));
+                log("info", T("auto-exit wait set to %1 sec (saved to ai_build.json)").arg(cfg_.auto_exit_wait_sec));
             });
     connect(auto_exit_cancel_btn_, &QPushButton::clicked,
             this, [this]() {
                 cancel_auto_exit_ = true;
-                log("info", "✕ 用户点了取消退出 (next timer tick 不再 quit)");
+                log("info", T("✕ user clicked cancel-exit (next timer tick won't quit)"));
             });
 
     // 2026-10-15: 编译进度 label (scons 编译 N 个文件)
@@ -634,7 +659,7 @@ void AbMainWindow::buildCentralPanel() {
     panel_progress_ = new QProgressBar();
     panel_progress_->setRange(0, 1);
     panel_progress_->setValue(0);
-    panel_progress_->setFormat("0 / 0  (sub-task)");
+    panel_progress_->setFormat(T("0 / %1  (sub-task)").arg(0));
     panel_progress_->setFixedHeight(20);
     // 让主题 QSS 接管 (QProgressBar 已在 QSS)
     root->addWidget(panel_progress_);
@@ -650,7 +675,7 @@ void AbMainWindow::buildCentralPanel() {
     cb_layout->setContentsMargins(8, 4, 8, 4);
     cb_layout->setSpacing(2);
     QHBoxLayout* cur_top = new QHBoxLayout();
-    QLabel* cur_title = new QLabel("⚡ 当前执行");
+    QLabel* cur_title = new QLabel(T("⚡ Current"));
     cur_title->setFont(QFont("sans-serif", 11, QFont::Weight::Bold));
     cur_top->addWidget(cur_title);
     panel_lbl_current_idx_ = new QLabel("—");
@@ -668,7 +693,7 @@ void AbMainWindow::buildCentralPanel() {
     panel_txt_current_cmd_->setMaximumHeight(70);
     panel_txt_current_cmd_->setLineWrapMode(QPlainTextEdit::LineWrapMode::WidgetWidth);
     // 跟随主题 (QSS 已配 QPlainTextEdit)
-    panel_txt_current_cmd_->setPlaceholderText("(等待 sub-task 开始)");
+    panel_txt_current_cmd_->setPlaceholderText(T("(waiting for sub-task to start)"));
     cb_layout->addWidget(panel_txt_current_cmd_);
     // 注: panel_current_box_ 加入 QTabWidget (panel_task_tab_) 在下方, 不直接 addWidget 到 root
 
@@ -692,7 +717,7 @@ void AbMainWindow::buildCentralPanel() {
     left->setMinimumWidth(120);
     QVBoxLayout* ll = new QVBoxLayout(left);
     ll->setContentsMargins(0, 0, 0, 0);
-    QLabel* lbl_left_title = new QLabel("📋 Sub-task 进度");
+    QLabel* lbl_left_title = new QLabel(T("📋 Sub-task Progress"));
     ll->addWidget(lbl_left_title);
     panel_sub_list_ = new QListWidget();
     panel_sub_list_->setFont(QFont("monospace", 10));
@@ -715,7 +740,7 @@ void AbMainWindow::buildCentralPanel() {
     QVBoxLayout* rl = new QVBoxLayout(right);
     rl->setContentsMargins(0, 0, 0, 0);
     QHBoxLayout* log_header = new QHBoxLayout();
-    panel_lbl_log_summary_ = new QLabel("📄 实时 log (stdout, 0 行)");
+    panel_lbl_log_summary_ = new QLabel(T("📄 Live Log (%1 lines)").arg(0));
     log_header->addWidget(panel_lbl_log_summary_);
     log_header->addStretch();
     rl->addLayout(log_header);
@@ -741,16 +766,16 @@ void AbMainWindow::buildCentralPanel() {
 
     // ====== 详情区 ======
     // 2026-10-19: 详情面板默认隐藏 (用户点击 sub-task 才显示), 加关闭按钮
-    panel_detail_box_ = new QGroupBox("📜 选中 sub-task 详情");
+    panel_detail_box_ = new QGroupBox(T("📜 Sub-task Details"));
     QVBoxLayout* dl = new QVBoxLayout(panel_detail_box_);
     dl->setContentsMargins(6, 4, 6, 4);
     dl->setSpacing(2);
     QHBoxLayout* dt = new QHBoxLayout();
-    panel_lbl_detail_meta_ = new QLabel("(未选中 sub-task)");
+    panel_lbl_detail_meta_ = new QLabel(T("(no sub-task selected)"));
     panel_lbl_detail_meta_->setFont(QFont("monospace", 10, QFont::Weight::Bold));
     dt->addWidget(panel_lbl_detail_meta_);
     dt->addStretch();
-    panel_btn_open_sub_log_ = new QPushButton("📂 打开 sub-task log");
+    panel_btn_open_sub_log_ = new QPushButton(T("📂 Open sub-task log"));
     panel_btn_open_sub_log_->setEnabled(false);
     connect(panel_btn_open_sub_log_, &QPushButton::clicked, this, [this]() {
         // 复用 TaskRunnerWindow 的逻辑 (提取到 helper)
@@ -761,26 +786,26 @@ void AbMainWindow::buildCentralPanel() {
         QDir d(dir);
         QStringList files = d.entryList(nameFilters, QDir::Files, QDir::Time);
         if (files.isEmpty()) {
-            log("warn", QString("⚠ 找不到 sub-task %1 的 log").arg(panel_selected_sub_idx_));
+            log("warn", T("⚠ No log found for sub-task %1").arg(panel_selected_sub_idx_));
             return;
         }
         QString log_path = dir + "/" + files.first();
         QDesktopServices::openUrl(QUrl::fromLocalFile(log_path));
-        log("ok", QString("📂 打开 %1").arg(log_path));
+        log("ok", T("📂 Opened %1").arg(log_path));
     });
     dt->addWidget(panel_btn_open_sub_log_);
-    panel_btn_copy_sub_cmd_ = new QPushButton("📋 复制完整命令");
+    panel_btn_copy_sub_cmd_ = new QPushButton(T("📋 Copy Full Command"));
     panel_btn_copy_sub_cmd_->setEnabled(false);
     connect(panel_btn_copy_sub_cmd_, &QPushButton::clicked, this, [this]() {
         if (panel_selected_sub_idx_ <= 0 || !panel_txt_detail_cmd_) return;
         QApplication::clipboard()->setText(panel_txt_detail_cmd_->toPlainText());
-        log("ok", "✓ 完整命令已复制到剪贴板");
+        log("ok", T("✓ full command copied to clipboard"));
     });
     dt->addWidget(panel_btn_copy_sub_cmd_);
     // 2026-10-19: 关闭按钮 — 隐藏整个详情面板
     panel_btn_close_detail_ = new QPushButton("✕");
     panel_btn_close_detail_->setFixedSize(24, 24);
-    panel_btn_close_detail_->setToolTip("关闭详情面板 (点击左侧 sub-task 重新打开)");
+    panel_btn_close_detail_->setToolTip(T("Close details panel (click a sub-task row to reopen)"));
     connect(panel_btn_close_detail_, &QPushButton::clicked, this, [this]() {
         if (panel_detail_box_) panel_detail_box_->setVisible(false);
     });
@@ -792,7 +817,7 @@ void AbMainWindow::buildCentralPanel() {
     panel_txt_detail_cmd_->setMinimumHeight(80);
     panel_txt_detail_cmd_->setMaximumHeight(280);
     panel_txt_detail_cmd_->setLineWrapMode(QPlainTextEdit::LineWrapMode::WidgetWidth);
-    panel_txt_detail_cmd_->setPlaceholderText("(点击左侧 sub-task 行, 显示完整命令)");
+    panel_txt_detail_cmd_->setPlaceholderText(T("(click a sub-task row on the left to see the full command)"));
     // 跟随主题 QSS
     panel_txt_detail_cmd_->setVerticalScrollBarPolicy(Qt::ScrollBarPolicy::ScrollBarAlwaysOn);
     dl->addWidget(panel_txt_detail_cmd_);
@@ -840,25 +865,25 @@ void AbMainWindow::buildStatusBar() {
     setStatusBar(statusbar_);
 
     // 1) 最左: 项目路径 + auto 链 (持久显示, 不被 log 覆盖)
-    QString auto_text = cfg_.auto_chain.isEmpty() ? "(无)" : cfg_.auto_chain.join(" → ");
+    QString auto_text = cfg_.auto_chain.isEmpty() ? T("(none)") : cfg_.auto_chain.join(" → ");
     sb_proj_ = new QLabel(QString("📁 %1  |  auto: %2")
                           .arg(cfg_.cwd, auto_text));
     // 2026-10-19 fix-theme: 让主题 QSS 接管状态栏颜色
     statusbar_->addWidget(sb_proj_, 1);  // 拉伸占 1 份
 
     // 2) 中: 动态 log 状态 (✗/✓ msg, 被 log() 覆盖)
-    sb_left_ = new QLabel("就绪");
+    sb_left_ = new QLabel(T("Ready"));
     statusbar_->addWidget(sb_left_, 1);  // 拉伸占 1 份
 
     // 2.5) 2026-09-16 fix71: 渲染模式 label (展示默认 Vulkan / OpenGL 兼容模式差异)
     //   默认 "渲染模式: —" 灰, 启动 cloud_main (Vulkan) → "渲染模式: Vulkan (Forward+)" 蓝,
     //   启动兼容模式 → "渲染模式: OpenGL3 (Compatibility)" 橙. 让用户一眼看到当前是哪种渲染.
-    sb_render_ = new QLabel("渲染模式: —");
+    sb_render_ = new QLabel(T("Renderer: —"));
     sb_render_->setProperty("level", "info");  // 走 QSS 默认蓝色 (跟之前 #2980b9 类似)
     statusbar_->addPermanentWidget(sb_render_);
 
     // 3) 右: Qt/主题 (进度条/进度文字 2026-09-16 v3 移到了中央面板顶部 header)
-    sb_right_ = new QLabel(QString("Qt=%1 | 主题=%2")
+    sb_right_ = new QLabel(T("Qt=%1 | Theme=%2")
                            .arg(qApp ? "Qt5/6" : "?", cfg_.theme));
     statusbar_->addPermanentWidget(sb_right_);
 }
@@ -922,10 +947,8 @@ void AbMainWindow::buildToolbar() {
         // 第一行末尾加"📊 任务运行器"内置按钮
         if (r == 0) {
             tb->addSeparator();
-            QAction* a_runner = new QAction("📊 任务运行器", this);
-            a_runner->setToolTip("打开独立任务运行器窗口 (仿 ac_task_runner_gui.py)\n"
-                                "左侧 sub-task 列表 + 右侧实时 log + ⚡ 当前执行 + 详情区\n"
-                                "底部按钮: Stop / 复制 log / 打开 log / 启动 cloud_main");
+            QAction* a_runner = new QAction(T("📊 Task Runner"), this);
+            a_runner->setToolTip(T("Open Task Runner window (sub-task list + live log + current + details)"));
             a_runner->setData("open_task_runner");
             a_runner->setShortcut(QKeySequence("Ctrl+R"));
             tb->addAction(a_runner);
@@ -969,7 +992,16 @@ void AbMainWindow::onActionTriggered() {
         id = b->property("abId").toString();
     }
     if (id.isEmpty()) return;
-    log("debug", QString("触发动作: %1").arg(id));
+    log("debug", T("Triggered action: %1").arg(id));
+
+    // 2026-10-26 i18n: 语言切换 (视图 → 语言). 保存 lang.json + 整体重建 UI 立即生效.
+    if (id.startsWith("lang:")) {
+        AbLang::Kind k = AbLang::parse(id.mid(5));
+        AbLang::apply(static_cast<int>(k));
+        rebuildUi();
+        log("ok", T("Language switched: %1 (saved)").arg(AbLang::displayName(static_cast<int>(k))));
+        return;
+    }
 
     // 特殊 id 处理
     if (id == "run_selected") { onRunSelectedTask(); return; }
@@ -987,7 +1019,7 @@ void AbMainWindow::onActionTriggered() {
         AbTheme::Kind k = AbTheme::parse(name);
         AbTheme::apply(static_cast<int>(k));
         cfg_.theme = name;  // 同步到配置
-        if (sb_right_) sb_right_->setText(QString("Qt=%1 | 主题=%2").arg(qApp ? "Qt5/6" : "?", name));
+        if (sb_right_) sb_right_->setText(T("Qt=%1 | Theme=%2").arg(qApp ? "Qt5/6" : "?", name));
         log("ok", QString("主题切换: %1").arg(AbTheme::displayName(static_cast<int>(k))));
         return;
     }
@@ -1002,15 +1034,15 @@ void AbMainWindow::onActionTriggered() {
     if (id == "open_ght")     {
         // 跨进程: 调 ac ght (用探测到的绝对路径, 避免桌面 GUI PATH 不全)
         if (ac_binary_.isEmpty()) {
-            log("err", "✗ ac 未找到, 没法打开 Token 管理 (请装 ai_tools 并确认 ~/.local/bin 在 PATH)");
+            log("err", T("✗ ac not found, cannot open Token Manager (install ai_tools and check ~/.local/bin in PATH)"));
             return;
         }
-        log("info", QString("→ 调 %1 ght --no-check").arg(ac_binary_));
+        log("info", QString("→ %1 ght --no-check").arg(ac_binary_));
         qint64 pid = 0;
         if (QProcess::startDetached(ac_binary_, QStringList() << "ght" << "--no-check", QDir::homePath(), &pid)) {
-            log("ok", QString("✓ Token 管理已启动, pid=%1").arg(pid));
+            log("ok", T("✓ Token manager started, pid=%1").arg(pid));
         } else {
-            log("err", "✗ 启动 ac ght 失败");
+            log("err", T("✗ failed to start ac ght"));
         }
         return;
     }
@@ -1018,14 +1050,14 @@ void AbMainWindow::onActionTriggered() {
         bool ok = false;
         QString text = QInputDialog::getText(
             this,
-            "TTS 播报",
-            "请输入要播报的内容:",
+            T("TTS Speak"),
+            T("Text to speak:"),
             QLineEdit::Normal,
-            "ab 工具链就绪",
+            T("ab toolchain ready"),
             &ok
         );
         if (!ok || text.trimmed().isEmpty()) {
-            log("info", "TTS 已取消");
+            log("info", T("TTS cancelled"));
             return;
         }
         log("info", QString("→ TTS: %1").arg(text));
@@ -1034,20 +1066,20 @@ void AbMainWindow::onActionTriggered() {
     }
     if (id == "bak") {
         if (ac_binary_.isEmpty()) {
-            log("err", "✗ ac 未找到, 备份功能不可用");
+            log("err", T("✗ ac not found, backup unavailable"));
             return;
         }
-        log("info", QString("→ 调 %1 bak %2").arg(ac_binary_).arg(cfg_.cwd));
+        log("info", QString("→ %1 bak %2").arg(ac_binary_).arg(cfg_.cwd));
         QProcess::startDetached(ac_binary_, QStringList() << "bak" << cfg_.cwd);
         return;
     }
     if (id == "proxy_test") {
         // 调 ac ght-cli --proxy-test, 检测 GitHub API 代理是否通
         if (ac_binary_.isEmpty()) {
-            log("err", "✗ ac 未找到, 没法跑代理测试");
+            log("err", T("✗ ac not found, cannot run proxy test"));
             return;
         }
-        log("info", QString("→ 调 %1 ght-cli --proxy-test").arg(ac_binary_));
+        log("info", QString("→ %1 ght-cli --proxy-test").arg(ac_binary_));
         QProcess::startDetached(ac_binary_, QStringList() << "ght-cli" << "--proxy-test", QDir::homePath());
         return;
     }
@@ -1079,28 +1111,90 @@ void AbMainWindow::onActionTriggered() {
             if (mi.id == id) {
                 if (!mi.task.isEmpty()) runTaskByName(mi.task);
                 else if (!mi.cmd.isEmpty()) runCmd(mi.cmd, id);
-                else log("warn", QString("菜单项 %1 没有 task/cmd").arg(id));
+                else log("warn", T("Menu item %1 has no task/cmd").arg(id));
                 return;
             }
         }
     }
-    log("warn", QString("未定义的动作: %1").arg(id));
+    log("warn", T("Undefined action: %1").arg(id));
+}
+
+// 2026-10-26 i18n: 语言切换后整体重建 UI
+//   思路: 所有界面文案都在 build*() 里经 AbLang::T() 生成, 切语言时把
+//   菜单/工具栏/中央面板/状态栏全部拆掉重 build 一遍, 立即全量生效.
+//   注意:
+//     - config_watcher_ / F5 reload action 是一次性的, 不重建 (不会重复挂)
+//     - 副窗口 (任务检查器/任务运行器) 直接关掉, 用户重开时按新语言创建
+//     - 正在跑的 task 不受影响: runner_ signals 接的是 this, 重建后新 widget 继续接 log
+void AbMainWindow::rebuildUi() {
+    // 0) 面板计时器先停再删 (buildCentralPanel 会新建; 防止 tick 到旧 widget)
+    if (panel_elapsed_timer_)    { panel_elapsed_timer_->stop();    panel_elapsed_timer_->deleteLater();    panel_elapsed_timer_ = nullptr; }
+    if (panel_current_dt_timer_) { panel_current_dt_timer_->stop(); panel_current_dt_timer_->deleteLater(); panel_current_dt_timer_ = nullptr; }
+    // auto-exit 倒计时 timer: 语言切换视为用户接管, 停掉 (不再自动退)
+    if (auto_exit_countdown_timer_) { auto_exit_countdown_timer_->stop(); auto_exit_countdown_timer_->deleteLater(); auto_exit_countdown_timer_ = nullptr; }
+
+    // 1) 关副窗口 (deleteLater; destroyed signal 会把指针清 nullptr)
+    if (task_runner_win_)  { task_runner_win_->deleteLater();  task_runner_win_ = nullptr; }
+    if (inspector_window_) { inspector_window_->deleteLater(); inspector_window_ = nullptr; }
+
+    // 2) actions_/buttons_ 清空 (QAction 宿主: menu/toolbar/this 混合, 统一 deleteLater 安全 —
+    //    QObject 析构会取消未处理的 DeferredDelete, 不会 double free)
+    for (auto it = actions_.begin(); it != actions_.end(); ++it) it.value()->deleteLater();
+    actions_.clear();
+    for (auto it = buttons_.begin(); it != buttons_.end(); ++it) it.value()->deleteLater();
+    buttons_.clear();
+
+    // 3) 菜单栏清空 (QMenuBar 上的 QMenu 是其 child, deleteLater 释放)
+    menuBar()->clear();
+    const auto menus = menuBar()->findChildren<QMenu*>(QString(), Qt::FindDirectChildrenOnly);
+    for (QMenu* m : menus) m->deleteLater();
+
+    // 4) 工具栏全删 (内置主工具栏 + 中央面板操作工具栏 + ui.toolbar 自定义行)
+    const auto toolbars = findChildren<QToolBar*>();
+    for (QToolBar* tb : toolbars) { removeToolBar(tb); tb->deleteLater(); }
+
+    // 5) 状态栏替换前删旧的
+    if (QStatusBar* old_sb = statusBar()) { setStatusBar(nullptr); old_sb->deleteLater(); }
+
+    // 6) 中央 widget 删 (takeCentralWidget 移交所有权)
+    if (QWidget* cw = takeCentralWidget()) cw->deleteLater();
+
+    // 7) 重建 (跟构造时的顺序一致)
+    buildCentralPanel();
+    buildStatusBar();
+    buildBuiltInMenus();
+    buildBuiltInToolbar();
+    buildBuiltInButtons();
+    buildMenus();
+    buildToolbar();
+    buildMainButtons();
+
+    // 8) 按钮可用性跟 runner 状态对齐 (正在跑 task 时禁止再启动)
+    const bool running = runner_ && runner_->isRunning();
+    if (auto a = actions_.value("run_selected")) a->setEnabled(!running);
+    if (auto a = actions_.value("run_auto"))     a->setEnabled(!running);
+    if (auto a = actions_.value("stop"))         a->setEnabled(running);
+    if (panel_btn_stop_) panel_btn_stop_->setEnabled(running);
+
+    // 9) 标题 + 🔔 启动提示按钮恢复 (allow_modal=false: 只回填按钮, 不重新弹模态框)
+    updateWindowTitle();
+    showStartupPrompts(/*allow_modal=*/false);
 }
 
 void AbMainWindow::onRunSelectedTask() {
     // 2026-09-16 v4: "跑选中" 改去 InspectorWindow 任务 tab 找
     if (!inspector_window_) {
-        log("warn", "任务检查器窗口未打开, 先按 Ctrl+I 打开 [任务检查器] 窗口");
+        log("warn", T("Task Inspector window not open, press Ctrl+I first"));
         return;
     }
     auto* ins = inspector_window_->inspector();
     if (!ins) {
-        log("warn", "任务检查器未初始化");
+        log("warn", T("Task Inspector window not open, press Ctrl+I first"));
         return;
     }
     auto* it = ins->selectedTaskItem();
     if (!it) {
-        log("warn", "没选中任务 (在 [任务检查器] 窗口 → [📋 任务] tab 选中一行, 再按 F5)");
+        log("warn", T("No task selected (select a row in Task Inspector → 📋 Tasks, then F5)"));
         return;
     }
     QString name = it->text(1);  // 列 1 = 任务名
@@ -1115,10 +1209,10 @@ void AbMainWindow::onInspectorRunTask(const QString& task_name) {
 
 void AbMainWindow::onRunAuto() {
     if (cfg_.auto_chain.isEmpty()) {
-        log("warn", "auto 链为空 (在 ai_build.json 的 auto 字段定义)");
+        log("warn", T("Auto chain is empty (define in ai_build.json auto field)"));
         return;
     }
-    log("task", QString("跑 auto 链: %1").arg(cfg_.auto_chain.join(" → ")));
+    log("task", T("Run auto chain: %1").arg(cfg_.auto_chain.join(" → ")));
     auto_queue_ = cfg_.auto_chain;
     auto_index_ = 0;
     runNextInAuto();
@@ -1132,7 +1226,7 @@ void AbMainWindow::runNextInAuto() {
         //   这样 agent (sandbox) 跑完能立刻拿到 $? 决定下一步, 不需要 wait-for-user.
         bool all_ok = (last_task_exit_code_ == 0);
         log(all_ok ? "ok" : "warn",
-            QString("auto 链结束 (all_ok=%1 last_rc=%2 auto_exit=%3)")
+            T("Auto chain finished (all_ok=%1 last_rc=%2 auto_exit=%3)")
             .arg(all_ok ? "true" : "false")
             .arg(last_task_exit_code_)
             .arg(cfg_.auto_exit ? "true" : "false"));
@@ -1163,17 +1257,17 @@ void AbMainWindow::runNextInAuto() {
             auto_exit_countdown_timer_->setInterval(1000);
             int remaining = wait_sec;
             QString countdown_msg = all_ok
-                ? QString("✓ auto 链成功, %1 秒后自动退出 (点 ✕ 取消)").arg(remaining)
-                : QString("⚠ auto 链失败 (rc=%1), %2 秒后自动退出 — 复制: cat /tmp/ab-error-*.log | grep task_name=<FAILED_TASK> (点 ✕ 取消)")
+                ? T("✓ auto chain succeeded, exiting in %1 s (click ✕ to cancel)").arg(remaining)
+                : T("⚠ auto chain failed (rc=%1), exiting in %2 s — copy: cat /tmp/ab-error-*.log (click ✕ to cancel)")
                       .arg(final_rc).arg(remaining);
             log(all_ok ? "ok" : "warn", countdown_msg);
             if (auto_exit_cancel_btn_) {
                 auto_exit_cancel_btn_->setVisible(true);
-                auto_exit_cancel_btn_->setText(QString("✕ 取消退出 (%1s)").arg(remaining));
+                auto_exit_cancel_btn_->setText(T("✕ Cancel Exit (%1s)").arg(remaining));
             }
             connect(auto_exit_countdown_timer_, &QTimer::timeout, this, [this, all_ok, final_rc, wait_ms]() {
                 if (cancel_auto_exit_) {
-                    log("info", "✕ 用户取消了 auto-exit");
+                    log("info", T("✕ user cancelled auto-exit"));
                     if (auto_exit_cancel_btn_) auto_exit_cancel_btn_->setVisible(false);
                     if (auto_exit_countdown_timer_) { auto_exit_countdown_timer_->stop(); }
                     return;
@@ -1186,13 +1280,16 @@ void AbMainWindow::runNextInAuto() {
                     return;
                 }
                 if (auto_exit_cancel_btn_) {
-                    auto_exit_cancel_btn_->setText(QString("✕ 取消退出 (%1s)").arg(remaining_counter_));
+                    auto_exit_cancel_btn_->setText(T("✕ Cancel Exit (%1s)").arg(remaining_counter_));
                 }
-                log(all_ok ? "ok" : "warn",
-                    QString(all_ok
-                        ? "✓ 成功, %1 秒后退出 (点 ✕ 取消)"
-                        : "⚠ 失败 (rc=%1), %2 秒后退出 — 复制 cat /tmp/ab-error-*.log (点 ✕ 取消)")
+                // 2026-10-26 fix: 成功分支只有 %1, 失败分支 %1+%2 — 分开 arg (之前合并写法
+                //   在成功分支会报 "Argument missing" 警告)
+                if (all_ok) {
+                    log("ok", T("✓ success, exiting in %1 s (click ✕ to cancel)").arg(remaining_counter_));
+                } else {
+                    log("warn", T("⚠ failed (rc=%1), exiting in %2 s — copy cat /tmp/ab-error-*.log (click ✕ to cancel)")
                         .arg(final_rc).arg(remaining_counter_));
+                }
             });
             auto_exit_countdown_timer_->start();
             // 立即触发一次让剩余时间从 wait_sec 开始显示
@@ -1239,7 +1336,7 @@ void AbMainWindow::updateWindowTitle(const QString& current_cmd) {
 
 void AbMainWindow::runTaskByName(const QString& name, std::function<void()> on_done) {
     if (runner_->isRunning()) {
-        log("warn", "已有 task 在跑, 请先停止");
+        log("warn", T("A task is already running, stop it first"));
         return;
     }
     // 2026-09-16: 查 task 是 sub-task list 模式还是单 cmd 模式
@@ -1259,19 +1356,19 @@ void AbMainWindow::runTaskByName(const QString& name, std::function<void()> on_d
         }
     }
     if (!is_sub_mode && single_cmd.isEmpty()) {
-        log("err", QString("未知 task: %1").arg(name));
+        log("err", T("Unknown task: %1").arg(name));
         if (on_done) on_done();
         return;
     }
 
-    log("task", QString("▶ 跑 task [%1]: %2 (mode=%3)")
-        .arg(name, is_sub_mode ? QString("sub-task list (%1 步)").arg(sub_cmds.size()) : "single cmd",
+    log("task", T("▶ run task [%1]: %2 (mode=%3)")
+        .arg(name, is_sub_mode ? T("sub-task list (%1 steps)").arg(sub_cmds.size()) : "single cmd",
              is_sub_mode ? "sub" : "single"));
     current_task_ = name;
     panel_task_name_ = name;
     // 标题: sub-task 模式显示 "task_name (N sub-tasks)"
     if (is_sub_mode) {
-        updateWindowTitle(QString("(%1 sub-tasks)").arg(sub_cmds.size()));
+        updateWindowTitle(T("(%1 sub-tasks)").arg(sub_cmds.size()));
     } else {
         updateWindowTitle(single_cmd);
     }
@@ -1305,10 +1402,10 @@ void AbMainWindow::runTaskByName(const QString& name, std::function<void()> on_d
 
 void AbMainWindow::runCmd(const QString& cmd, const QString& task_name) {
     if (runner_->isRunning()) {
-        log("warn", "已有 task 在跑");
+        log("warn", T("A task is already running, stop it first"));
         return;
     }
-    log("task", QString("▶ 跑 cmd [%1]: %2").arg(task_name, cmd));
+    log("task", T("▶ run cmd [%1]: %2").arg(task_name, cmd));
     current_task_ = task_name;
     current_cmd_  = cmd;
     panel_task_name_ = task_name;
@@ -1322,10 +1419,10 @@ void AbMainWindow::runCmd(const QString& cmd, const QString& task_name) {
 
 void AbMainWindow::onStop() {
     if (runner_->isRunning()) {
-        log("warn", "停止当前 task");
+        log("warn", T("Stopping current task"));
         runner_->stop();
     } else {
-        log("info", "没有 task 在跑");
+        log("info", T("No task running"));
     }
 }
 
@@ -1336,6 +1433,12 @@ void AbMainWindow::onOutput(const QString& task_name, const QString& line) {
     if (ll.contains("error") || ll.contains("fatal") || ll.contains("failed")) level = "err";
     else if (ll.contains("warning")) level = "warn";
     else if (line.contains("✓") || ll.contains("[ok]")) level = "ok";
+
+    // 2026-10-26 i18n: 右侧实时 log 显示层做"部分词汇翻译" (仅 zh 模式):
+    //   "Compiling editor/editor_node.cpp ..." → "编译 editor/editor_node.cpp ..."
+    //   "WARNING: msgfmt execution failed"     → "警告: msgfmt execution failed"
+    //   文件名/路径/技术细节不动. /tmp/ab-session.log + stderr 仍写原文 (agent/管道拿原文).
+    const QString display = AbLang::translateLogLine(line);
 
     // 2026-09-16 v10: 同步写 /tmp/ab-session.log (跟 log() 一样的 fallback, 跟 panel_log_view_ 互不干扰)
     //   用户反馈"实时 log 没输出" - 实际 panel_log_view_ 有内容, 但 /tmp/ab-session.log 里看不到
@@ -1354,7 +1457,7 @@ void AbMainWindow::onOutput(const QString& task_name, const QString& line) {
     if (panel_log_view_) {
         // 2026-10-15: 解析 ANSI 颜色 (scons 等会用 ESC[xxm 染色) + 符号标记
         //   ▶▶▶ / ✓ / ✗ / 🚀 加颜色; ESC 序列翻译成 <span style="color:...">
-        appendColoredLine(panel_log_view_, line);
+        appendColoredLine(panel_log_view_, display);
         // 自动滚到底
         if (auto* sb = panel_log_view_->verticalScrollBar()) {
             sb->setValue(sb->maximum());
@@ -1362,19 +1465,19 @@ void AbMainWindow::onOutput(const QString& task_name, const QString& line) {
         // 更新 log 摘要
         if (panel_lbl_log_summary_) {
             panel_lbl_log_summary_->setText(
-                QString("📄 实时 log (stdout, %1 行)").arg(panel_log_view_->blockCount()));
+                T("📄 Live Log (%1 lines)").arg(panel_log_view_->blockCount()));
         }
     }
 
     // 兼容: 也写到 sb_left_ 状态栏 (log_dock_ 已移除, 不写 dock)
     if (sb_left_) {
-        sb_left_->setText(QString("[%1] %2").arg(task_name, line.left(120)));
+        sb_left_->setText(QString("[%1] %2").arg(task_name, display.left(120)));
     }
 }
 
 void AbMainWindow::onFinished(const QString& task_name, int exit_code, double elapsed) {
     log(exit_code == 0 ? "ok" : "err",
-        QString("[%1] 退出码 %2  耗时 %3s").arg(task_name).arg(exit_code).arg(elapsed, 0, 'f', 1));
+        T("[%1] exit code %2  elapsed %3s").arg(task_name).arg(exit_code).arg(elapsed, 0, 'f', 1));
     last_task_exit_code_ = exit_code;  // 2026-10-09 add-auto-exit: 给 runNextInAuto 检查
 
     // 2026-10-15: task 结束 → 隐藏编译进度 label (避免残留)
@@ -1385,7 +1488,7 @@ void AbMainWindow::onFinished(const QString& task_name, int exit_code, double el
     // 2026-09-16 v3: 更新中央面板顶部状态 (status badge + elapsed 停 + 进度条满)
     if (panel_lbl_status_) {
         if (exit_code == 0) {
-            panel_lbl_status_->setText("✓ Done");
+            panel_lbl_status_->setText(T("✓ Done"));
             // 2026-10-19 fix-theme: 用 dynamicProperty level 让 QSS 接管, 不硬编码绿
             panel_lbl_status_->setProperty("level", "ok");
             panel_lbl_status_->style()->unpolish(panel_lbl_status_);
@@ -1395,7 +1498,7 @@ void AbMainWindow::onFinished(const QString& task_name, int exit_code, double el
                 panel_progress_->setFormat(QString("✓ %1 / %1").arg(panel_progress_->maximum()));
             }
         } else {
-            panel_lbl_status_->setText(QString("✗ Fail (rc=%1)").arg(exit_code));
+            panel_lbl_status_->setText(T("✗ Fail (rc=%1)").arg(exit_code));
             panel_lbl_status_->setProperty("level", "err");
             panel_lbl_status_->style()->unpolish(panel_lbl_status_);
             panel_lbl_status_->style()->polish(panel_lbl_status_);
@@ -1470,7 +1573,7 @@ void AbMainWindow::speakTaskFinished(const QString& task_name, int exit_code) co
 }
 
 void AbMainWindow::onError(const QString& task_name, int err) {
-    log("err", QString("[%1] QProcess 错误码 %2").arg(task_name).arg(err));
+    log("err", T("[%1] QProcess error %2").arg(task_name).arg(err));
     updateWindowTitle();   // 2026-09-09: 恢复窗口标题
 }
 
@@ -1526,12 +1629,12 @@ void AbMainWindow::onRunCloud() {
     if (cloud_binary_.isEmpty()) {
         cloud_binary_ = findRunBinary();
         if (cloud_binary_.isEmpty()) {
-            QMessageBox::warning(this, "未找到",
-                QString("%1 不存在, 请先跑 build+deploy 编译").arg(cfg_.run_after_build.binary_path));
+            QMessageBox::warning(this, T("Not Found"),
+                T("%1 does not exist, run build+deploy first").arg(cfg_.run_after_build.binary_path));
             return;
         }
     }
-    log("task", QString("🚀 启动 %1 (后台)").arg(QFileInfo(cloud_binary_).fileName()));
+    log("task", T("🚀 Launch %1 (background)").arg(QFileInfo(cloud_binary_).fileName()));
     QStringList args = cfg_.run_after_build.args;
     // cloud_main 是长跑 GUI 程序, 用 startDetached 后台跑, 不阻塞 ab GUI.
     // 早期版本用 p->start + waitForFinished(-1) 会卡住 GUI, 而且 cloud_main 退出时
@@ -1602,7 +1705,7 @@ void AbMainWindow::onRunCloud() {
         log("info", QString("  停止: kill %1  或  pkill -f %2").arg(pid).arg(QFileInfo(cloud_binary_).fileName()));
         // 2026-09-16 fix71: 状态栏显示渲染模式
         if (sb_render_) {
-            sb_render_->setText("渲染模式: Vulkan (Forward+)");
+            sb_render_->setText(T("Renderer: Vulkan (Forward+)"));
             // 2026-10-19 fix-theme: 用 level=info 让 QSS 接管蓝色
             sb_render_->setProperty("level", "info");
             sb_render_->style()->unpolish(sb_render_);
@@ -1610,7 +1713,7 @@ void AbMainWindow::onRunCloud() {
         }
         speakTextAsync(QString("启动 %1").arg(QFileInfo(cloud_binary_).fileName()));
     } else {
-        log("err", QString("✗ 启动失败: %1").arg(cloud_binary_));
+        log("err", T("✗ Launch failed: %1").arg(cloud_binary_));
     }
 }
 
@@ -1618,12 +1721,12 @@ void AbMainWindow::onRunCloudGL() {
     if (cloud_binary_.isEmpty()) {
         cloud_binary_ = findRunBinary();
         if (cloud_binary_.isEmpty()) {
-            QMessageBox::warning(this, "未找到",
-                QString("%1 不存在, 请先跑 build+deploy 编译").arg(cfg_.run_after_build.binary_path));
+            QMessageBox::warning(this, T("Not Found"),
+                T("%1 does not exist, run build+deploy first").arg(cfg_.run_after_build.binary_path));
             return;
         }
     }
-    log("task", QString("🚀 启动 %1 (OpenGL 兼容模式)").arg(QFileInfo(cloud_binary_).fileName()));
+    log("task", T("🚀 Launch %1 (OpenGL compat mode)").arg(QFileInfo(cloud_binary_).fileName()));
     
     // 给 args 追加 --gl
     QStringList args = cfg_.run_after_build.args;
@@ -1667,7 +1770,7 @@ void AbMainWindow::onRunCloudGL() {
             log("ok", QString("✓ cloud_main 已通过 .sh 启动 (OpenGL), pid=%1").arg(pid));
             // 2026-09-16 fix71: 状态栏显示渲染模式
             if (sb_render_) {
-                sb_render_->setText("渲染模式: OpenGL3 (Compatibility)");
+                sb_render_->setText(T("Renderer: OpenGL3 (Compatibility)"));
                 // 2026-10-19 fix-theme: 用 level=warn 让 QSS 接管橙色
                 sb_render_->setProperty("level", "warn");
                 sb_render_->style()->unpolish(sb_render_);
@@ -1683,7 +1786,7 @@ void AbMainWindow::onRunCloudGL() {
         log("ok", QString("✓ %1 已在后台启动 (OpenGL fallback), pid=%2").arg(QFileInfo(cloud_binary_).fileName()).arg(pid));
         speakTextAsync(QString("启动兼容模式"));
     } else {
-        log("err", QString("✗ 启动失败: %1").arg(cloud_binary_));
+        log("err", T("✗ Launch failed: %1").arg(cloud_binary_));
     }
 }
 
@@ -1691,7 +1794,7 @@ void AbMainWindow::onBuildAndRun() {
     log("task", "⚡ 编译并启动");
     QString t = !resolveTaskCmd("build+deploy").isEmpty() ? "build+deploy" : "build-only";
     if (t.isEmpty()) {
-        QMessageBox::warning(this, "未配置", "ai_build.json 缺 build+deploy 任务");
+        QMessageBox::warning(this, T("Not Configured"), T("ai_build.json has no build+deploy task"));
         return;
     }
     cfg_.run_after_build.auto_run = true;
@@ -1702,7 +1805,7 @@ void AbMainWindow::onBuildAndRunGL() {
     log("task", "⚡ 编译并启动 (OpenGL)");
     QString t = !resolveTaskCmd("build+deploy").isEmpty() ? "build+deploy" : "build-only";
     if (t.isEmpty()) {
-        QMessageBox::warning(this, "未配置", "ai_build.json 缺 build+deploy 任务");
+        QMessageBox::warning(this, T("Not Configured"), T("ai_build.json has no build+deploy task"));
         return;
     }
     cfg_.run_after_build.auto_run = true;
@@ -1790,7 +1893,7 @@ void AbMainWindow::onOpenTaskRunner() {
         task_runner_win_ = nullptr;
     });
     task_runner_win_->show();
-    log("ok", QString("📊 任务运行器已打开 — %2").arg(task_name));
+    log("ok", T("📊 Task Runner opened — %1").arg(task_name));
 }
 
 // 2026-09-16 v4: 打开独立 InspectorWindow (任务检查器窗口)
@@ -1813,19 +1916,12 @@ void AbMainWindow::onOpenInspector() {
         inspector_window_ = nullptr;
     });
     inspector_window_->show();
-    log("ok", "📋 任务检查器已打开 (独立窗口 — 📋 任务 / ⚙️ 进程 / 🔧 sub-task)");
+    log("ok", T("📋 Task Inspector opened (separate window — 📋 Tasks / ⚙️ Processes / 🔧 sub-task)"));
 }
 
 void AbMainWindow::onAbout() {
-    QMessageBox::information(this, "关于 ab",
-        QString("ab — AI Build 编译/调试 GUI (C++ Qt5/6)\n"
-                "版本: 1.0.0\n"
-                "项目: %1\n"
-                "任务: %2 个\n"
-                "主题: %3\n\n"
-                "ab 是通用的 AI 辅助构建工具,\n"
-                "通过 ai_build.json 配置文件驱动 UI.\n"
-                "想改按钮/菜单, 改 ai_build.json 的 ui 段即可.")
+    QMessageBox::information(this, T("About ab"),
+        T("ab — AI Build GUI (C++ Qt5/6)\nVersion: 1.0.0\nProject: %1\nTasks: %2\nTheme: %3\n\nab is a generic AI-assisted build tool,\ndriven by ai_build.json.\nTo change buttons/menus, edit the ui section of ai_build.json.")
         .arg(cfg_.cwd)
         .arg(static_cast<int>(cfg_.tasks.size()))
         .arg(cfg_.theme));
@@ -1840,8 +1936,12 @@ void AbMainWindow::log(const QString& level, const QString& msg) {
     //   1) stderr: 终端跑 `ab` 时直接看 (带 fflush, SIGTERM 也不丢)
     //   2) 状态栏: GUI 模式下右下角状态条
     //   3) 文件 /tmp/ab-session.log: 兜底, GUI 脱离终端 / 重定向丢了也能 tail 看
-    const char* lvl = level.toUtf8().constData();
-    const char* m_str = msg.toUtf8().constData();
+    // 2026-10-26 fix-dangling: toUtf8() 返回临时 QByteArray, constData() 在语句结束后悬垂
+    //   (之前 "[info]" 前缀偶尔变成消息内容本身, 如 "[任务数: 1] 任务数: 1")
+    const QByteArray lvl_ba  = level.toUtf8();
+    const QByteArray msg_ba  = msg.toUtf8();
+    const char* lvl = lvl_ba.constData();
+    const char* m_str = msg_ba.constData();
     std::fprintf(stderr, "[%s] %s\n", lvl, m_str);
     std::fflush(stderr);
 
@@ -1984,16 +2084,16 @@ void AbMainWindow::panelResetUi(int total) {
     if (panel_progress_) {
         panel_progress_->setRange(0, panel_total_sub_);
         panel_progress_->setValue(0);
-        panel_progress_->setFormat(QString("0 / %1  (sub-task)").arg(panel_total_sub_));
+        panel_progress_->setFormat(T("0 / %1  (sub-task)").arg(panel_total_sub_));
     }
 
     // 顶部 header
     if (panel_lbl_title_) {
-        panel_lbl_title_->setText(panel_task_name_.isEmpty() ? "⏸ 暂无任务" : panel_task_name_);
+        panel_lbl_title_->setText(panel_task_name_.isEmpty() ? T("⏸ No Task") : panel_task_name_);
         // 2026-10-19 fix-theme: 不硬编码标题色 (跟随主题)
     }
     if (panel_lbl_status_) {
-        panel_lbl_status_->setText("⏳ 等待启动");
+        panel_lbl_status_->setText(T("⏳ Waiting"));
         // 2026-10-19 fix-theme: 用 level=info 让 QSS 接管灰色背景
         panel_lbl_status_->setProperty("level", "info");
         panel_lbl_status_->style()->unpolish(panel_lbl_status_);
@@ -2017,11 +2117,11 @@ void AbMainWindow::panelResetUi(int total) {
     // 摘要更新
     if (panel_lbl_log_summary_ && panel_log_view_) {
         panel_lbl_log_summary_->setText(
-            QString("📄 实时 log (stdout, %1 行)").arg(panel_log_view_->blockCount()));
+            T("📄 Live Log (%1 lines)").arg(panel_log_view_->blockCount()));
     }
 
     // 详情区
-    if (panel_lbl_detail_meta_) panel_lbl_detail_meta_->setText("(未选中 sub-task)");
+    if (panel_lbl_detail_meta_) panel_lbl_detail_meta_->setText(T("(no sub-task selected)"));
     if (panel_txt_detail_cmd_) panel_txt_detail_cmd_->clear();
     if (panel_btn_open_sub_log_) panel_btn_open_sub_log_->setEnabled(false);
     if (panel_btn_copy_sub_cmd_) panel_btn_copy_sub_cmd_->setEnabled(false);
@@ -2041,7 +2141,7 @@ void AbMainWindow::panelAppendSubTaskItem(int idx, int total, const QString& des
     panel_sub_states_[idx] = st;
 
     QString label = desc.isEmpty()
-                    ? QString("  ⏳ [%1/%2] 等待…").arg(idx).arg(total)
+                    ? T("  ⏳ [%1/%2] waiting...").arg(idx).arg(total)
                     : QString("  ⏳ [%1/%2] %3").arg(idx).arg(total).arg(desc);
     QListWidgetItem* it = new QListWidgetItem(label, panel_sub_list_);
     it->setForeground(QColor("#888"));
@@ -2067,7 +2167,7 @@ void AbMainWindow::panelUpdateRunningItem(int idx, int total) {
                     : QString("  ⟳ [%1/%2] %3").arg(idx).arg(total).arg(desc);
         it->setText(l);
         it->setForeground(QColor("#88ccff"));
-        QString tip = QString("sub-task [%1/%2]  跑中…\n").arg(idx).arg(total);
+        QString tip = T("sub-task [%1/%2]  running...\n").arg(idx).arg(total);
         if (!desc.isEmpty()) tip += "\n📌 " + desc;
         if (!cmd.isEmpty())  tip += "\n$ " + cmd;
         it->setToolTip(tip);
@@ -2110,7 +2210,7 @@ void AbMainWindow::panelUpdateFinishedItem(int idx, int total, int rc, double dt
             if (s.status == "ok" || s.status == "fail") done++;
         }
         panel_progress_->setValue(done);
-        panel_progress_->setFormat(QString("%1 / %2  (sub-task)").arg(done).arg(total));
+        panel_progress_->setFormat(T("%1 / %2  (sub-task)").arg(done).arg(total));
     }
 
     // 当前执行区
@@ -2151,7 +2251,7 @@ void AbMainWindow::onSubStartedPanel(const QString& task_name, int idx, int tota
     }
     // 顶部 status badge
     if (panel_lbl_status_) {
-        panel_lbl_status_->setText(QString("⏳ Running (%1/%2)").arg(idx).arg(total));
+        panel_lbl_status_->setText(T("⏳ Running (%1/%2)").arg(idx).arg(total));
         // 2026-10-19 fix-theme: 用 level=info 让 QSS 接管蓝色背景 (running)
         panel_lbl_status_->setProperty("level", "info");
         panel_lbl_status_->style()->unpolish(panel_lbl_status_);
@@ -2171,7 +2271,7 @@ void AbMainWindow::onSubFinishedPanel(const QString& task_name, int idx, int tot
 void AbMainWindow::onSubFailedPanel(const QString& task_name, int idx, int total) {
     if (task_name != current_task_) return;
     if (panel_lbl_status_) {
-        panel_lbl_status_->setText(QString("✗ Failed at %1/%2").arg(idx).arg(total));
+        panel_lbl_status_->setText(T("✗ Failed at %1/%2").arg(idx).arg(total));
         // 2026-10-19 fix-theme: 用 level=err 让 QSS 接管红色背景 (failed)
         panel_lbl_status_->setProperty("level", "err");
         panel_lbl_status_->style()->unpolish(panel_lbl_status_);
@@ -2198,9 +2298,9 @@ void AbMainWindow::onSubProgress(const QString& task_name, int /*idx*/, int /*to
     }
     QString text;
     if (last_file.isEmpty()) {
-        text = QString("🔨 已编译 %1 个文件").arg(compile_count);
+        text = T("🔨 compiled %1 files").arg(compile_count);
     } else {
-        text = QString("🔨 已编译 %1 个 (%2)").arg(compile_count).arg(last_file);
+        text = T("🔨 compiled %1 (%2)").arg(compile_count).arg(last_file);
     }
     panel_lbl_compile_progress_->setText(text);
     panel_lbl_compile_progress_->setVisible(true);
@@ -2216,7 +2316,7 @@ void AbMainWindow::onPanelTaskListClicked() {
     if (!panel_sub_list_) return;
     QListWidgetItem* it = panel_sub_list_->currentItem();
     if (!it) {
-        if (panel_lbl_detail_meta_) panel_lbl_detail_meta_->setText("(未选中 sub-task)");
+        if (panel_lbl_detail_meta_) panel_lbl_detail_meta_->setText(T("(no sub-task selected)"));
         if (panel_txt_detail_cmd_) panel_txt_detail_cmd_->clear();
         if (panel_btn_open_sub_log_) panel_btn_open_sub_log_->setEnabled(false);
         if (panel_btn_copy_sub_cmd_) panel_btn_copy_sub_cmd_->setEnabled(false);
@@ -2265,7 +2365,7 @@ void AbMainWindow::onPanelUpdateCurrentDt() {
 
 void AbMainWindow::onPanelStopClicked() {
     if (runner_ && runner_->isRunning()) {
-        log("info", "⏹ 正在停止 task");
+        log("info", T("⏹ Stopping task..."));
         runner_->stop();
     }
 }
@@ -2273,7 +2373,7 @@ void AbMainWindow::onPanelStopClicked() {
 void AbMainWindow::onPanelCopyLog() {
     if (!panel_log_view_) return;
     QApplication::clipboard()->setText(panel_log_view_->toPlainText());
-    log("ok", "✓ log 已复制到剪贴板");
+    log("ok", T("✓ log copied to clipboard"));
 }
 
 void AbMainWindow::onPanelOpenLogDir() {
@@ -2283,12 +2383,12 @@ void AbMainWindow::onPanelOpenLogDir() {
         QProcess* p = new QProcess(this);
         p->start(c, {dir});
         if (p->waitForStarted(1500)) {
-            log("ok", QString("📂 打开 %1").arg(dir));
+            log("ok", T("📂 Opened %1").arg(dir));
             return;
         }
         delete p;
     }
-    log("warn", QString("⚠ 找不到文件管理器, log 目录: %1").arg(dir));
+    log("warn", T("⚠ No file manager found, log dir: %1").arg(dir));
 }
 
 // 2026-09-20: 移除 AbMainWindow::onPanelLaunchCloud() — 这是 godot_ui_linux 项目专用

@@ -166,6 +166,19 @@ ac-gui               # 旧名软链, 等同 ab
 主题状态持久化在 `~/.config/ai_tools/theme.json`。
 GUI 菜单 视图 → 切换主题, 或点工具栏上的 ☀/🌙 按钮。
 
+## 语言 (中文/English) — 2026-10-26 加
+
+- 默认**中文**, 所有按钮/菜单/面板/状态文案都走翻译表 (`src/AbLang.cpp`)
+- GUI 菜单 **视图 → 语言** 可切 中文/English, 切换后立即整体重建 UI 生效
+- 选择**自动保存**到 `~/.config/ai_tools/lang.json` (跟 theme.json 同目录), 下次启动沿用
+- CLI 强制覆盖: `ab --lang zh|en` (会写 lang.json)
+- **实时 log 窗口的"部分词汇翻译"** (仅中文模式, 显示层翻译):
+  - `Compiling editor/x.cpp ...` → `编译 editor/x.cpp ...`
+  - `WARNING: msgfmt execution failed` → `警告: msgfmt execution failed`
+  - `ERROR:`/`error:` → `错误:`、`Linking` → `链接`、`Generating` → `生成`、`scons: done building targets.` → `scons: 全部构建完成.` 等
+  - 文件名/路径/技术细节保持原样; 终端 stderr 和 `/tmp/ab-session.log` 仍写**原文** (agent/管道拿原文可 grep)
+- 翻译表是双向的 (en↔zh), 新增文案在 `AbLang.cpp` 的 `kTrTable` 加一行 `{en, zh}` 即可, 代码里传英文或中文 key 都行
+
 ## 文件结构
 
 ```
