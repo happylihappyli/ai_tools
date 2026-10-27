@@ -1437,6 +1437,23 @@ void AbMainWindow::onStop() {
     }
 }
 
+// 2026-10-26 opt-perf: /tmp/ab-session.log 常驻句柄 (log() / onOutput 共用).
+//   之前 onOutput 每行 fopen/fprintf/fclose — 一次编译几千行输出 = 几千组 open/close syscall.
+static FILE* abSessionLogFp() {
+    static FILE* s_fp = nullptr;
+    static bool s_tried = false;
+    if (!s_tried) {
+        s_tried = true;
+        s_fp = std::fopen("/tmp/ab-session.log", "a");
+        if (s_fp) {
+            std::fprintf(s_fp, "\n===== ab session start %s =====\n",
+                         QDateTime::currentDateTime().toString(Qt::ISODate).toUtf8().constData());
+            std::fflush(s_fp);
+        }
+    }
+    return s_fp;
+}
+
 void AbMainWindow::onOutput(const QString& task_name, const QString& line) {
     if (line.isEmpty()) return;
     QString ll = line.toLower();
@@ -1454,14 +1471,13 @@ void AbMainWindow::onOutput(const QString& task_name, const QString& line) {
     // 2026-09-16 v10: 同步写 /tmp/ab-session.log (跟 log() 一样的 fallback, 跟 panel_log_view_ 互不干扰)
     //   用户反馈"实时 log 没输出" - 实际 panel_log_view_ 有内容, 但 /tmp/ab-session.log 里看不到
     //   sub-task cmd 输出 / ✓/✗ 标记 / ▶▶▶ desc 都走 onOutput, 现在也写到文件
-    {
-        FILE* fp = std::fopen("/tmp/ab-session.log", "a");
-        if (fp) {
-            std::fprintf(fp, "[%s] [%s] %s\n", level.toUtf8().constData(),
-                         task_name.toUtf8().constData(), line.toUtf8().constData());
-            std::fflush(fp);
-            std::fclose(fp);
-        }
+    //   2026-10-26 opt-perf: 改用 abSessionLogFp() 常驻句柄, 不再每行 fopen/fclose
+    if (FILE* fp = abSessionLogFp()) {
+        const QByteArray lv_ba = level.toUtf8();
+        const QByteArray tn_ba = task_name.toUtf8();
+        const QByteArray ln_ba = line.toUtf8();
+        std::fprintf(fp, "[%s] [%s] %s\n", lv_ba.constData(), tn_ba.constData(), ln_ba.constData());
+        std::fflush(fp);
     }
 
     // 2026-09-16 v3: 写入中央面板右侧 log (主路径)
@@ -1956,16 +1972,8 @@ void AbMainWindow::log(const QString& level, const QString& msg) {
     std::fprintf(stderr, "[%s] %s\n", lvl, m_str);
     std::fflush(stderr);
 
-    // 写文件 (追加模式, 静默失败不弹错)
-    static FILE* s_log_fp = nullptr;
-    if (!s_log_fp) {
-        s_log_fp = std::fopen("/tmp/ab-session.log", "a");
-        if (s_log_fp) {
-            std::fprintf(s_log_fp, "\n===== ab session start %s =====\n",
-                         QDateTime::currentDateTime().toString(Qt::ISODate).toUtf8().constData());
-        }
-    }
-    if (s_log_fp) {
+    // 写文件 (追加模式, 静默失败不弹错) — 2026-10-26 opt-perf: 与 onOutput 共用常驻句柄
+    if (FILE* s_log_fp = abSessionLogFp()) {
         std::fprintf(s_log_fp, "[%s] %s\n", lvl, m_str);
         std::fflush(s_log_fp);
     }
