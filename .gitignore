@@ -17,6 +17,7 @@ step_data.json
 
 # ab (AI Build) C++ 项目构建产物
 /ab/build/
+/ab/bin/
 /ab/src/AbJson.h.gch
 /CMakeCache.txt
 

@@ -36,6 +36,21 @@ AbTaskRunner::~AbTaskRunner() {
 }
 
 // 共享: 准备 QProcess (lazy init + signal connect)
+// 2026-10-30 跨平台: Linux 用 /bin/sh -c, Windows 用 cmd.exe /c (等价 python shell=True)
+static void startShellCommand(QProcess* p, const QString& cmd) {
+#ifdef Q_OS_WIN
+    // Windows: cmd.exe /c "<cmd>" — QProcess 会给含空格的整串加引号,
+    // cmd /c "完整命令行" 跟 python subprocess(shell=True) 行为一致
+    QStringList args;
+    args << "/c" << cmd;
+    p->start("cmd.exe", args);
+#else
+    QStringList args;
+    args << "-c" << cmd;
+    p->start("/bin/sh", args);
+#endif
+}
+
 QProcess* AbTaskRunner::ensureProc() {
     if (!proc_) {
         proc_ = new QProcess(this);
@@ -69,11 +84,9 @@ void AbTaskRunner::run(const QString& task_name, const QString& cmd,
     p->setWorkingDirectory(working_dir);
     p->setProcessChannelMode(QProcess::SeparateChannels);
 
-    // shell 模式: /bin/sh -c "<cmd>"
-    QStringList args;
-    args << "-c" << cmd;
+    // shell 模式: Linux /bin/sh -c, Windows cmd.exe /c (见 startShellCommand)
     start_t_ = std::chrono::steady_clock::now();
-    p->start("/bin/sh", args);
+    startShellCommand(p, cmd);
 }
 
 // 2026-09-16 新增: 跑 sub-task list (串行, 失败立即停)
@@ -156,9 +169,7 @@ void AbTaskRunner::runNextSubTask() {
         return;
     }
     proc_->setProcessChannelMode(QProcess::SeparateChannels);
-    QStringList args;
-    args << "-c" << sub_cmd;
-    proc_->start("/bin/sh", args);
+    startShellCommand(proc_, sub_cmd);
 }
 
 bool AbTaskRunner::isRunning() const {

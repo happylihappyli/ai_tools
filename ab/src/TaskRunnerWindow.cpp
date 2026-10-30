@@ -136,7 +136,9 @@ void TaskRunnerWindow::buildUi() {
 
     // ============== 进度条 ==============
     progress_ = new QProgressBar();
-    progress_->setRange(0, std::max(sub_cmds_.size(), 1));
+    // Qt6 的 QStringList::size() 返回 qsizetype (long long), 跟 int 字面量做 std::max 会模板推导冲突,
+    // 这里先取 max 再转 int, Qt5/Qt6 都能编
+    progress_->setRange(0, static_cast<int>(sub_cmds_.size() > 0 ? sub_cmds_.size() : 1));
     progress_->setValue(0);
     progress_->setFormat(T("0 / %1  (sub-task)").arg(sub_cmds_.size()));
     progress_->setFixedHeight(20);

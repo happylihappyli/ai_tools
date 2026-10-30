@@ -482,33 +482,50 @@ class CompileExecutor:
         _track("compile_start", "编译开始", f"Command: {cmd} (CWD: {cwd_str})")
 
         # 合并 stderr 到 stdout，并使用 stdbuf 强制行缓冲
+        use_pty = True
         try:
             env = os.environ.copy()
             env["PYTHONUNBUFFERED"] = "1"
             env["GUS_PROGRESS_FORCE"] = "1"
-            
-            # 增加 PTY 支持以欺骗编译器输出实时流
-            import pty
-            master, slave = pty.openpty()
+
+            # Windows 没有 pty (无 termios), 退化成普通管道读取
+            try:
+                import pty  # noqa: F401
+            except ImportError:
+                use_pty = False
 
             on_msg(CompileMessage("info", text=f"🛠 正在启动: {cmd}", raw=f"Starting: {cmd}"))
 
-            self.process = subprocess.Popen(
-                cmd,
-                shell=True,
-                cwd=cwd_str,
-                stdout=slave,
-                stderr=slave,
-                text=True,
-                bufsize=1,
-                env=env,
-                preexec_fn=os.setsid if os.name != "nt" else None
-            )
-            
-            # 关闭从端，主端读取
-            os.close(slave)
-            self.master_fd = master
-            
+            if use_pty:
+                # 增加 PTY 支持以欺骗编译器输出实时流
+                master, slave = pty.openpty()
+                self.process = subprocess.Popen(
+                    cmd,
+                    shell=True,
+                    cwd=cwd_str,
+                    stdout=slave,
+                    stderr=slave,
+                    text=True,
+                    bufsize=1,
+                    env=env,
+                    preexec_fn=os.setsid if os.name != "nt" else None
+                )
+                # 关闭从端，主端读取
+                os.close(slave)
+                self.master_fd = master
+            else:
+                # Windows: 用 PIPE, 主线程按行读
+                self.process = subprocess.Popen(
+                    cmd,
+                    shell=True,
+                    cwd=cwd_str,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    env=env,
+                )
+
             if self.process.pid:
                 on_msg(CompileMessage("info", text=f"✅ 进程已启动 (PID: {self.process.pid})", raw="Process started"))
 
@@ -520,35 +537,43 @@ class CompileExecutor:
 
         messages = []
         try:
-            import select
-            while self.is_running:
-                # 使用 select 防止阻塞，设置 0.1s 超时
-                r, _, _ = select.select([self.master_fd], [], [], 0.1)
-                if self.master_fd in r:
-                    try:
-                        data = os.read(self.master_fd, 4096).decode('utf-8', errors='replace')
-                    except OSError:
-                        break
-                    
-                    if not data:
+            if use_pty:
+                import select
+                while self.is_running:
+                    # 使用 select 防止阻塞，设置 0.1s 超时
+                    r, _, _ = select.select([self.master_fd], [], [], 0.1)
+                    if self.master_fd in r:
+                        try:
+                            data = os.read(self.master_fd, 4096).decode('utf-8', errors='replace')
+                        except OSError:
+                            break
+
+                        if not data:
+                            if self.process.poll() is not None:
+                                break
+                            continue
+
+                        for line in data.splitlines():
+                            elapsed = int((time.time() - self.start_time) * 1000)
+                            msg = self.parser.parse(line, elapsed)
+                            messages.append(msg)
+                            on_msg(msg)
+                    else:
+                        # 如果超时且进程已结束，则跳出
                         if self.process.poll() is not None:
                             break
-                        continue
-                    
-                    for line in data.splitlines():
-                        elapsed = int((time.time() - self.start_time) * 1000)
-                        msg = self.parser.parse(line, elapsed)
-                        messages.append(msg)
-                        on_msg(msg)
-                else:
-                    # 如果超时且进程已结束，则跳出
-                    if self.process.poll() is not None:
-                        break
-                    
+            else:
+                # Windows: 直接按行读管道
+                assert self.process.stdout is not None
+                for line in self.process.stdout:
+                    elapsed = int((time.time() - self.start_time) * 1000)
+                    msg = self.parser.parse(line.rstrip("\r\n"), elapsed)
+                    messages.append(msg)
+                    on_msg(msg)
         except Exception as e:
             on_msg(CompileMessage("error", text=f"⚠ 读取输出时出错: {str(e)}", raw=str(e)))
         finally:
-            if hasattr(self, 'master_fd'):
+            if use_pty and hasattr(self, 'master_fd'):
                 try:
                     os.close(self.master_fd)
                 except OSError:

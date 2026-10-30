@@ -2,41 +2,92 @@
 #
 # SConstruct for ai_tools/ab (C++ Qt5/6 GUI)
 # 2026-09-02: 新增, 跟 CMakeLists.txt 并存, 二选一编译
-#   默认: scons -j$(nproc)    → build/ab
+#   默认: scons -j$(nproc)    → bin/ab
 #   老 cmake 路径: cd build && cmake .. && make  (仍然保留)
 #
 # 用法:
-#   scons -j$(nproc)                 # 编译, 输出 build/ab
-#   scons -j$(nproc) --clean         # 干净重建 (删 build/ 全部)
-#   scons install                    # install 到 /usr/local/bin
+#   scons                       # 编译, 输出 bin/ab (Windows: bin/ab.exe)
+#   scons --clean               # 干净重建 (删 build/ + bin/)
+#   scons install               # install 到 /usr/local/bin
 #   scons --prefix=/your/prefix install
 #
 # 设计:
 #   - Qt5 (通过 pkg-config, 5.15.13 OK), Qt6 兼容
 #   - MOC: 扫 src/*.h 找 Q_OBJECT, 生成 moc_*.cpp 加入编译
-#   - 输出: build/ab (跟 cmake 一致, ab_launcher 通用)
+#   - 产物统一放 bin/ 目录 (用户规则: scons 编译产物放 bin 目录)
+#   - 编译带 UTF-8 选项 (GCC: -finput-charset/-fexec-charset, MSVC: /utf-8)
+#   - 脚本开始/结束打印时间 (用户规则)
 #   - 不依赖 cmake, 纯 scons 即可
+#
+# 跨平台:
+#   - Linux: pkg-config 找 Qt5/Qt6 + 编译完建 ~/.local/bin/ab 软链
+#   - Windows: MinGW(g++) + Qt6 mingw_64, 跳过软链 (Windows 建 symlink 要开发者模式)
+#     环境变量可覆盖: MINGW_BIN / QT_PREFIX / PKG_CONFIG_PATH
 #
 # 跟 CMakeLists.txt 的差异:
 #   - cmake 走 AUTOMOC (扫 .h 生成 moc_*.cpp 塞到 ab_autogen)
 #   - scons 这边手工 MOC (更可控, 日志更清晰)
 
 import os
-import re
+import platform
 import subprocess
+import sys
+import time
+
+# ===== 0. 计时 (用户规则: 开始/结束显示时间) =====
+_BUILD_T0 = time.time()
+_START_STR = time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _print(msg: str) -> None:
+    """带时间戳打印 (编译日志里好定位)。"""
+    print(f"[{time.strftime('%H:%M:%S')}] {msg}")
+
+
+_print(f"=== ab 构建开始: {_START_STR} ===")
+
+IS_WINDOWS = (platform.system() == "Windows")
 
 # ===== 1. 环境 =====
-env = Environment(ENV=os.environ, tools=['default'])
+# Windows 优先把 MinGW / Qt6 塞进 PATH, 后面 pkg-config / moc / g++ 才找得到
+if IS_WINDOWS:
+    MINGW_BIN = os.environ.get("MINGW_BIN", r"D:\Code\msys64\mingw64\bin")
+    QT_PREFIX = os.environ.get("QT_PREFIX", r"D:\Code\Qt\Qt6win\6.9.0\mingw_64")
+    if os.path.isdir(MINGW_BIN):
+        os.environ["PATH"] = MINGW_BIN + os.pathsep + os.environ.get("PATH", "")
+    _pkgconfig = os.path.join(QT_PREFIX, "lib", "pkgconfig")
+    if os.path.isdir(_pkgconfig):
+        os.environ["PKG_CONFIG_PATH"] = (
+            _pkgconfig + os.pathsep + os.environ.get("PKG_CONFIG_PATH", "")
+        )
+    _print(f"  MinGW : {MINGW_BIN}")
+    _print(f"  Qt    : {QT_PREFIX}")
+
+# Windows 强制用 MinGW 工具链 (源码含 <unistd.h>, MSVC 不支持)
+env = Environment(ENV=os.environ, tools=['mingw'] if IS_WINDOWS else ['default'])
 
 # C++17
 env.Append(CXXFLAGS=['-std=c++17', '-fPIC', '-Wall', '-Wextra'])
+
+# UTF-8 编译选项 (用户规则: c++ 要支持 utf-8 编译)
+if IS_WINDOWS and env.get('CC', '').lower().find('cl') >= 0:
+    env.Append(CXXFLAGS=['/utf-8'])
+else:
+    env.Append(CXXFLAGS=['-finput-charset=UTF-8', '-fexec-charset=UTF-8'])
+
+# MinGW 的 localtime_r 需要 _POSIX_THREAD_SAFE_FUNCTIONS (mingw64/include/time.h)
+if IS_WINDOWS:
+    env.Append(CPPDEFINES=['_POSIX_THREAD_SAFE_FUNCTIONS'])
 
 # 优化级别 (Release by default, debug 用 scons -O0 / scons debug=1)
 if not env.get('debug', False):
     env.Append(CXXFLAGS=['-O2'])
 
-# ===== 2. Qt5 (pkg-config) =====
-QT_VERSION_MAJOR = 5  # 跟 CMakeLists.txt 一致
+# 并行度: 用户没显式给 -j 时, 用 CPU 核数 (等价 Linux 的 -j$(nproc))
+if not env.GetOption('num_jobs') or env.GetOption('num_jobs') == 1:
+    env.SetOption('num_jobs', max(1, os.cpu_count() or 1))
+
+# ===== 2. Qt5 / Qt6 (pkg-config) =====
 # ParseConfig 在 command 返非 0 时抛 OSError (不会返 False), 所以先 try/except
 import subprocess as _sp
 _qt5 = _sp.run(['pkg-config', '--cflags', '--libs', 'Qt5Widgets', 'Qt5Core', 'Qt5Gui', 'Qt5Network'],
@@ -52,15 +103,36 @@ else:
         print(f"  Qt6 cflags: {_qt6.stdout.strip()[:200]}")
     else:
         print("✗ 找不到 Qt5 或 Qt6 dev 包 (pkg-config 失败)")
-        print("  安装: sudo apt install qtbase5-dev libqt5core5a libqt5widgets5 libqt5gui5 libqt5network5")
+        print("  Linux  : sudo apt install qtbase5-dev libqt5core5a libqt5widgets5 libqt5gui5 libqt5network5")
+        print("  Windows: 设 MINGW_BIN / QT_PREFIX 环境变量, 并确认 PKG_CONFIG_PATH 指向 Qt 的 lib/pkgconfig")
         Exit(1)
 
 qt5_ok = env.ParseConfig(f'pkg-config --cflags --libs Qt{QT_VERSION_MAJOR}Widgets Qt{QT_VERSION_MAJOR}Core Qt{QT_VERSION_MAJOR}Gui Qt{QT_VERSION_MAJOR}Network')
 print(f"✓ Qt{QT_VERSION_MAJOR} (pkg-config)")
 
-# MOC 工具路径
-MOC = os.popen(f'pkg-config --variable=moc_location Qt{QT_VERSION_MAJOR}Core 2>/dev/null').read().strip() or f'moc-qt{QT_VERSION_MAJOR}'
-if not os.path.exists(MOC):
+# MOC 工具路径: pkg-config 的 moc_location 很多发行版是空的, 退化到 Qt 的 bin/moc
+def _pkg_var(name):
+    """取 pkg-config 变量值 (跨平台, 不用 2>/dev/null, Windows 没有 /dev/null)"""
+    try:
+        r = _sp.run(['pkg-config', '--variable=' + name, f'Qt{QT_VERSION_MAJOR}Core'],
+                    capture_output=True, text=True)
+        if r.returncode == 0:
+            return r.stdout.strip()
+    except Exception:
+        pass
+    return ""
+
+
+MOC = _pkg_var('moc_location')
+if not MOC or not os.path.exists(MOC):
+    _qt_prefix = _pkg_var('prefix')
+    if _qt_prefix:
+        for _name in ('moc.exe', 'moc'):
+            _cand = os.path.join(_qt_prefix, 'bin', _name)
+            if os.path.exists(_cand):
+                MOC = _cand
+                break
+if not MOC or not os.path.exists(MOC):
     MOC = 'moc'  # 兜底, 多数 distro moc 默认是 Qt5
 
 print(f"  MOC = {MOC}")
@@ -96,28 +168,41 @@ for fn in sorted(os.listdir(SRC_DIR)):
 # MOC 生成的 moc_*.cpp
 qobject_headers = find_qobject_headers()
 print(f"  Q_OBJECT headers: {qobject_headers}")
-MOC_GEN_DIR = 'build/moc_gen'
+BUILD_DIR = 'build'
+MOC_GEN_DIR = os.path.join(BUILD_DIR, 'moc_gen')
 if not os.path.isdir(MOC_GEN_DIR):
     os.makedirs(MOC_GEN_DIR, exist_ok=True)
+
+
+def moc_action(target, source, env):
+    """调用 moc 生成 moc_*.cpp (失败时返回非 0, 让 scons 报错)。"""
+    cmd = [MOC, str(source[0]), '-o', str(target[0])]
+    _print(f"  moc {os.path.basename(str(source[0]))} → {os.path.basename(str(target[0]))}")
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.stderr.write(r.stdout + "\n" + r.stderr + "\n")
+    return r.returncode
+
 
 moc_outputs = []
 for h in qobject_headers:
     base = os.path.splitext(os.path.basename(h))[0]
     moc_cpp = os.path.join(MOC_GEN_DIR, f'moc_{base}.cpp')
-    # 自定义 Builder
-    moc_cmd = f'{MOC} $SOURCE -o $TARGET'
-    moc_obj = env.Command(
-        target=moc_cpp,
-        source=h,
-        action=moc_cmd,
-    )
+    moc_obj = env.Command(target=moc_cpp, source=h, action=moc_action)
     sources.append(moc_cpp)
-    moc_outputs.append(moc_cpp)
+    moc_outputs.append(moc_obj)
     env.Depends(moc_obj, h)
 
 # ===== 5. 编译目标 =====
-BUILD_DIR = 'build'
-TARGET = os.path.join(BUILD_DIR, 'ab')
+# 产物放 bin 目录 (用户规则: scons 编译的东西要放到 bin 目录)
+BIN_DIR = 'bin'
+PROG_NAME = 'ab.exe' if IS_WINDOWS else 'ab'
+TARGET = os.path.join(BIN_DIR, PROG_NAME)
+OBJ_DIR = os.path.join(BUILD_DIR, 'obj')
+if not os.path.isdir(BIN_DIR):
+    os.makedirs(BIN_DIR, exist_ok=True)
+if not os.path.isdir(OBJ_DIR):
+    os.makedirs(OBJ_DIR, exist_ok=True)
 
 # 包含路径
 env.Append(CPPPATH=[SRC_DIR, MOC_GEN_DIR])
@@ -130,49 +215,66 @@ env.Append(LIBS=[
     f'Qt{QT_VERSION_MAJOR}Network',
 ])
 
+# 目标文件统一放 build/obj (源码目录保持干净)
+objects = []
+for s in sources:
+    base = os.path.splitext(os.path.basename(s))[0]
+    if s.startswith(SRC_DIR + os.sep):
+        obj = os.path.join(OBJ_DIR, base + env.get('OBJSUFFIX', '.o'))
+    else:
+        obj = os.path.join(os.path.dirname(s), base + env.get('OBJSUFFIX', '.o'))
+    objects.append(env.Object(target=obj, source=s))
+
 # 编译
 print(f"  sources ({len(sources)}):")
 for s in sources:
     print(f"    - {s}")
 print(f"  target: {TARGET}")
 
-ab_bin = env.Program(target=TARGET, source=sources)
+ab_bin = env.Program(target=TARGET, source=objects)
 
 # ===== 6. clean 目标 =====
 if env.GetOption('clean'):
-    # --clean: 用户传了 --clean, 删 build/ 全部
+    # --clean: 用户传了 --clean, 删 build/ + bin/ 全部
     import shutil
-    if os.path.isdir(BUILD_DIR):
-        print(f"  rm -rf {BUILD_DIR}/")
-        shutil.rmtree(BUILD_DIR)
+    for d in (BUILD_DIR, BIN_DIR):
+        if os.path.isdir(d):
+            print(f"  rm -rf {d}/")
+            shutil.rmtree(d)
     Return()
 
-# 默认: 编译完成打印成功信息
+# 默认: 编译完成打印成功信息 + 结束时间
 def print_done(target, source, env):
+    cost = time.time() - _BUILD_T0
     print(f"\n✓ 编译完成: {os.path.abspath(str(target[0]))}")
+    print(f"  耗时: {cost:.1f}s")
     print(f"  跑 GUI: ab / ab --doctor / ac ab")
     return None
 
 env.AddPostAction(ab_bin, print_done)
 
 # ===== 7. 安装: 建 ~/.local/bin/ab symlink (跟 ac 一样) =====
-# 2026-09-02 加, 编译后自动 ~/.local/bin/ab → build/ab, 跑 `ab` 就能用
-LOCAL_BIN = os.path.expanduser("~/.local/bin")
-SYMLINK = os.path.join(LOCAL_BIN, "ab")
-TARGET_ABS = os.path.abspath(str(ab_bin[0]))  # build/ab 绝对路径
+# 2026-09-02 加, 编译后自动 ~/.local/bin/ab → 产物, 跑 `ab` 就能用
+# Windows 没有开发者模式建不了 symlink, 跳过
+if not IS_WINDOWS:
+    LOCAL_BIN = os.path.expanduser("~/.local/bin")
+    SYMLINK = os.path.join(LOCAL_BIN, "ab")
+    TARGET_ABS = os.path.abspath(str(ab_bin[0]))  # bin/ab 绝对路径
 
-def install_symlink(target, source, env):
-    os.makedirs(LOCAL_BIN, exist_ok=True)
-    # 已存在但指向别处, 删掉重建
-    if os.path.islink(SYMLINK) or os.path.exists(SYMLINK):
-        cur_target = os.readlink(SYMLINK) if os.path.islink(SYMLINK) else None
-        if cur_target == TARGET_ABS:
-            print(f"  ✓ symlink 已存在: {SYMLINK} → {TARGET_ABS}")
-            return None
-        os.remove(SYMLINK)
-    os.symlink(TARGET_ABS, SYMLINK)
-    print(f"  ✓ 建 symlink: {SYMLINK} → {TARGET_ABS}")
-    print(f"  跑: ab   (任何目录) 或  ab /path/to/project")
-    return None
+    def install_symlink(target, source, env):
+        os.makedirs(LOCAL_BIN, exist_ok=True)
+        # 已存在但指向别处, 删掉重建
+        if os.path.islink(SYMLINK) or os.path.exists(SYMLINK):
+            cur_target = os.readlink(SYMLINK) if os.path.islink(SYMLINK) else None
+            if cur_target == TARGET_ABS:
+                print(f"  ✓ symlink 已存在: {SYMLINK} → {TARGET_ABS}")
+                return None
+            os.remove(SYMLINK)
+        os.symlink(TARGET_ABS, SYMLINK)
+        print(f"  ✓ 建 symlink: {SYMLINK} → {TARGET_ABS}")
+        print(f"  跑: ab   (任何目录) 或  ab /path/to/project")
+        return None
 
-env.AddPostAction(ab_bin, install_symlink)
+    env.AddPostAction(ab_bin, install_symlink)
+else:
+    print(f"  (Windows 跳过 ~/.local/bin/ab 软链)")

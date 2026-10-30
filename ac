@@ -96,6 +96,12 @@ def find_spd_say() -> str:
     return shutil.which("spd-say") or ""
 
 
+def find_windows_tts() -> str:
+    """Windows 下用 PowerShell + System.Speech.Synthesis 调 SAPI
+    返回可执行的 powershell.exe 路径（找不到则空串）"""
+    return shutil.which("powershell") or shutil.which("powershell.exe") or ""
+
+
 def tts_event_text(event: str, n: int = 0) -> str:
     tmpl = TTS_EVENT_TEMPLATES.get(event, "")
     if not tmpl:
@@ -104,22 +110,47 @@ def tts_event_text(event: str, n: int = 0) -> str:
     return tmpl.format(**kwargs)
 
 
+def _powershell_tts_escape(text: str) -> str:
+    """PowerShell 单引号字符串里需要把单引号 escape 成两个"""
+    return text.replace("'", "''")
+
+
 def tts_cmd(text: str, *, lang: str = DEFAULT_TTS_LANG, rate: int = 0,
             pitch: int = 0, volume: int = 0, wait: bool = False) -> list:
+    """跨平台 TTS 命令构造
+    - Linux: 优先 spd-say
+    - Windows: fallback 到 PowerShell + SAPI (System.Speech.Synthesis.SpeechSynthesizer)
+    找不到任一可执行则返回 []，调用方负责静默跳过
+    """
     spd = find_spd_say()
-    if not spd:
-        return []
-    cmd = [spd, "-l", lang]
-    if rate:
-        cmd += ["-r", str(rate)]
-    if pitch:
-        cmd += ["-p", str(pitch)]
-    if volume:
-        cmd += ["-i", str(volume)]
-    if wait:
-        cmd += ["-w"]
-    cmd.append(text)
-    return cmd
+    if spd:
+        cmd = [spd, "-l", lang]
+        if rate:
+            cmd += ["-r", str(rate)]
+        if pitch:
+            cmd += ["-p", str(pitch)]
+        if volume:
+            cmd += ["-i", str(volume)]
+        if wait:
+            cmd += ["-w"]
+        cmd.append(text)
+        return cmd
+
+    # Windows fallback: PowerShell + SAPI
+    ps = find_windows_tts()
+    if ps:
+        # rate: -100..100 → SAPI Rate -10..10
+        sapi_rate = max(-10, min(10, rate // 10)) if rate else 0
+        ps_script = (
+            "Add-Type -AssemblyName System.Speech; "
+            "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+            f"$s.Rate = {sapi_rate}; "
+            f"$s.Speak('{_powershell_tts_escape(text)}')"
+        )
+        cmd = [ps, "-NoProfile", "-Command", ps_script]
+        return cmd
+
+    return []
 
 
 def bak_now_ts() -> str:
@@ -838,30 +869,50 @@ def run_tts_subcommand(sub_args: list) -> int:
     args = p.parse_args(sub_args)
 
     spd = find_spd_say()
+    ps = find_windows_tts()
     if args.check:
-        if not spd:
-            sys.stderr.write("✗ 找不到 spd-say, 安装: sudo apt install speech-dispatcher espeak-ng\n")
+        if spd:
+            print(f"✓ spd-say: {spd}")
+            rc = subprocess.call([spd, "-l", args.language, "ac tts 自检完成"])
+        elif ps:
+            print(f"✓ Windows TTS via PowerShell SAPI: {ps}")
+            rc = subprocess.call([ps, "-NoProfile", "-Command",
+                "Add-Type -AssemblyName System.Speech; "
+                "(New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('ac tts 自检完成')"])
+        else:
+            sys.stderr.write("✗ 找不到 spd-say (Linux) 或 powershell (Windows)，TTS 不可用\n")
+            sys.stderr.write("  Linux:   sudo apt install speech-dispatcher espeak-ng\n")
+            sys.stderr.write("  Windows: 系统自带 PowerShell，请确认 powershell.exe 在 PATH\n")
             return 1
-        print(f"✓ spd-say: {spd}")
-        rc = subprocess.call([spd, "-l", args.language, "ac tts 自检完成"])
         if rc != 0:
-            sys.stderr.write(f"✗ spd-say 自检失败 rc={rc}\n")
+            sys.stderr.write(f"✗ TTS 自检失败 rc={rc}\n")
         return rc
     if args.list:
-        if not spd:
-            sys.stderr.write("✗ 找不到 spd-say\n")
-            return 1
-        return subprocess.call([spd, "-L"])
+        if spd:
+            return subprocess.call([spd, "-L"])
+        if ps:
+            print("(Windows SAPI: 列出已安装语音)")
+            return subprocess.call([ps, "-NoProfile", "-Command",
+                "Add-Type -AssemblyName System.Speech; "
+                "(New-Object System.Speech.Synthesis.SpeechSynthesizer).GetInstalledVoices() | "
+                "Select-Object -ExpandProperty VoiceInfo | Select-Object Name, Culture | Format-Table"])
+        sys.stderr.write("✗ 找不到 spd-say 或 powershell\n")
+        return 1
     if args.stop:
-        if not spd:
-            sys.stderr.write("✗ 找不到 spd-say\n")
-            return 1
-        return subprocess.call([spd, "-S"])
+        # spd-say 没有此功能（用 -S），Windows SAPI 用 StopSpeaking
+        if spd:
+            return subprocess.call([spd, "-S"])
+        if ps:
+            return subprocess.call([ps, "-NoProfile", "-Command",
+                "Add-Type -AssemblyName System.Speech; "
+                "([System.Speech.Synthesis.SpeechSynthesizer]::new()).SpeakAsyncCancelAll()"])
+        sys.stderr.write("✗ 找不到 spd-say 或 powershell\n")
+        return 1
     if args.cancel:
-        if not spd:
-            sys.stderr.write("✗ 找不到 spd-say\n")
-            return 1
-        return subprocess.call([spd, "-C"])
+        if spd:
+            return subprocess.call([spd, "-C"])
+        sys.stderr.write("✗ Windows SAPI 无 --cancel 等价物\n")
+        return 1
 
     text = ""
     if args.event:
@@ -880,7 +931,9 @@ def run_tts_subcommand(sub_args: list) -> int:
     cmd = tts_cmd(text, lang=args.language, rate=args.rate,
                   pitch=args.pitch, volume=args.volume, wait=args.wait)
     if not cmd:
-        sys.stderr.write("✗ 找不到 spd-say, 安装: sudo apt install speech-dispatcher espeak-ng\n")
+        sys.stderr.write("✗ 找不到 TTS 后端 (spd-say 或 powershell)\n")
+        sys.stderr.write("  Linux:   sudo apt install speech-dispatcher espeak-ng\n")
+        sys.stderr.write("  Windows: 请确认 powershell.exe 在 PATH\n")
         return 1
     return subprocess.call(cmd)
 
